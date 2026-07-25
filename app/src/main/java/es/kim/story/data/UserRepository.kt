@@ -1,0 +1,69 @@
+package es.kim.story.data
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import javax.inject.Inject
+import javax.inject.Singleton
+@Singleton class UserRepository @Inject constructor(
+    private val dao: UserDao,
+    @param:ApplicationContext context: Context,
+) {
+    private val prefs = context.getSharedPreferences("active_account", Context.MODE_PRIVATE)
+    private val activeUserId = MutableStateFlow(prefs.getString("user_id", "").orEmpty())
+    val user = activeUserId.flatMapLatest { id -> if (id.isBlank()) flowOf(null) else dao.observeUser(id) }
+    val accounts = dao.observeAllUsers()
+
+    suspend fun saveUserId(id: String): Boolean {
+        val userId = id.trim()
+        if (userId.isBlank()) return false
+        if (dao.getUser(userId) == null) {
+            if (dao.userCount() >= MAX_ACCOUNTS) return false
+            dao.save(UserEntity(userId = userId))
+        }
+        switchAccount(userId)
+        return true
+    }
+    fun switchAccount(userId: String) {
+        prefs.edit().putString("user_id", userId).apply()
+        activeUserId.value = userId
+    }
+    suspend fun addMoney(amount: Long) = dao.addMoney(activeUserId.value, amount)
+    suspend fun addMoney(userId: String, amount: Long) = dao.addMoney(userId, amount)
+    suspend fun updateSeotdaNames(names: List<String>): Boolean {
+        if (names.size != 3 || names.any { it.isBlank() }) return false
+        dao.updateSeotdaNames(
+            activeUserId.value,
+            names[0].trim(),
+            names[1].trim(),
+            names[2].trim(),
+        )
+        return true
+    }
+    suspend fun deleteAccount(userId: String): Boolean {
+        if (userId == activeUserId.value) return false
+        return dao.deleteUser(userId) == 1
+    }
+    suspend fun updateGender(gender: String) = dao.updateGender(activeUserId.value, gender)
+    suspend fun settleGamble(wager: Long, payout: Long) =
+        dao.settleGamble(activeUserId.value, wager, payout)
+    suspend fun clearStoryChapter(chapter: Int, cost: Long): Boolean =
+        dao.clearStoryChapter(activeUserId.value, chapter, cost) == 1
+    suspend fun updateCurrentField(column: String, value: String): Boolean = when (column.lowercase()) {
+        "money" -> value.toLongOrNull()?.takeIf { it >= 0 }?.let {
+            dao.setMoney(activeUserId.value, it); true
+        } ?: false
+        "chapter" -> value.toIntOrNull()?.takeIf { it >= 1 }?.let {
+            dao.setChapter(activeUserId.value, it); true
+        } ?: false
+        "gender" -> value.takeIf { it == "남성" || it == "여성" }?.let {
+            dao.updateGender(activeUserId.value, it); true
+        } ?: false
+        else -> false
+    }
+
+    companion object {
+        const val MAX_ACCOUNTS = 3
+    }
+}
