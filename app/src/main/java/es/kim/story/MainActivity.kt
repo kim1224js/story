@@ -1,6 +1,7 @@
 package es.kim.story
 
 import android.os.Bundle
+import android.media.MediaPlayer
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -27,6 +28,9 @@ import androidx.health.connect.client.PermissionController
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.StepsRecord
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import dagger.hilt.android.AndroidEntryPoint
 import es.kim.story.ui.theme.ProjectSTheme
 import kotlinx.coroutines.delay
@@ -44,6 +48,16 @@ private enum class Screen { Splash, Login, Home, Switching }
 
 @Composable private fun StoryApp(vm: MainViewModel = viewModel()) {
     val context = LocalContext.current
+    val bgmPreferences = remember {
+        context.getSharedPreferences("audio_settings", android.content.Context.MODE_PRIVATE)
+    }
+    var bgmEnabled by remember {
+        mutableStateOf(bgmPreferences.getBoolean("bgm_enabled", true))
+    }
+    var bgmVolume by remember {
+        mutableFloatStateOf(bgmPreferences.getFloat("bgm_volume", 0.35f))
+    }
+    var homeBgm by remember { mutableIntStateOf(R.raw.bgm_wandering_woodlands) }
     val savedUser by vm.user.collectAsState()
     val accounts by vm.accounts.collectAsState()
     var screen by remember { mutableStateOf(Screen.Splash) }
@@ -74,6 +88,14 @@ private enum class Screen { Splash, Login, Home, Switching }
             screen = switchingDestination
         }
     }
+    AppBackgroundMusic(
+        musicRes = when (screen) {
+            Screen.Splash, Screen.Login, Screen.Switching -> R.raw.bgm_fairy_lights
+            Screen.Home -> homeBgm
+        },
+        enabled = bgmEnabled,
+        volume = bgmVolume,
+    )
     Scaffold(Modifier.fillMaxSize()) { padding -> Box(Modifier.fillMaxSize().padding(padding)) {
         when (screen) {
             Screen.Splash -> SplashScreen()
@@ -93,6 +115,17 @@ private enum class Screen { Splash, Login, Home, Switching }
             Screen.Home -> MainMenuScreen(
                 savedUser?.userId.orEmpty(),
                 vm,
+                bgmEnabled = bgmEnabled,
+                bgmVolume = bgmVolume,
+                onBgmEnabledChange = {
+                    bgmEnabled = it
+                    bgmPreferences.edit().putBoolean("bgm_enabled", it).apply()
+                },
+                onBgmVolumeChange = {
+                    bgmVolume = it
+                    bgmPreferences.edit().putFloat("bgm_volume", it).apply()
+                },
+                onBgmTrackChange = { homeBgm = it },
                 onLogout = {
                     loginInitialId = ""
                     screen = Screen.Login
@@ -106,6 +139,50 @@ private enum class Screen { Splash, Login, Home, Switching }
             Screen.Switching -> SwitchingScreen()
         }
     }}
+}
+
+@Composable
+private fun AppBackgroundMusic(musicRes: Int, enabled: Boolean, volume: Float) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var player by remember { mutableStateOf<MediaPlayer?>(null) }
+
+    DisposableEffect(musicRes, enabled) {
+        player?.release()
+        player = if (enabled) {
+            MediaPlayer.create(context.applicationContext, musicRes)?.apply {
+                isLooping = true
+                setVolume(volume, volume)
+                start()
+            }
+        } else {
+            null
+        }
+        onDispose {
+            player?.release()
+            player = null
+        }
+    }
+    LaunchedEffect(volume) {
+        player?.setVolume(volume, volume)
+    }
+    DisposableEffect(lifecycleOwner, enabled) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> {
+                    if (enabled && player?.isPlaying == false) player?.start()
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    if (player?.isPlaying == true) player?.pause()
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 }
 @Composable private fun SwitchingScreen() {
     Column(Modifier.fillMaxSize(), Arrangement.Center, Alignment.CenterHorizontally) {

@@ -2,6 +2,10 @@ package es.kim.story
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -62,11 +66,30 @@ private enum class MainMenu(val label: String, val icon: String, val title: Stri
 fun MainMenuScreen(
     userId: String,
     viewModel: MainViewModel,
+    bgmEnabled: Boolean,
+    bgmVolume: Float,
+    onBgmEnabledChange: (Boolean) -> Unit,
+    onBgmVolumeChange: (Float) -> Unit,
+    onBgmTrackChange: (Int) -> Unit,
     onLogout: () -> Unit,
     onSwitchAccount: (String) -> Unit,
 ) {
     var selected by remember { mutableStateOf(MainMenu.Story) }
     val user by viewModel.user.collectAsState()
+    LaunchedEffect(selected, user?.chapter) {
+        onBgmTrackChange(
+            when (selected) {
+                MainMenu.Work -> R.raw.bgm_jaunt
+                MainMenu.Gamble -> R.raw.bgm_bells_of_winter
+                MainMenu.Story -> if ((user?.chapter ?: 1) >= 21) {
+                    R.raw.bgm_creed_of_course
+                } else {
+                    R.raw.bgm_wandering_woodlands
+                }
+                MainMenu.Settlement, MainMenu.Items, MainMenu.Settings -> R.raw.bgm_fairy_lights
+            },
+        )
+    }
     Scaffold(
         topBar = {
             Surface(color = Color(0xFFFFFDF5), shadowElevation = 5.dp) {
@@ -98,7 +121,7 @@ fun MainMenuScreen(
                                 HeaderValue(
                                     "스토리 챕터",
                                     if ((user?.chapter ?: 1) > storyChapters.size) {
-                                        "STORY 2 완료"
+                                        "STORY 3 완료"
                                     } else {
                                         val progress = user?.chapter ?: 1
                                         "STORY ${(progress - 1) / 10 + 1} · CH.${(progress - 1) % 10 + 1}"
@@ -145,7 +168,16 @@ fun MainMenuScreen(
                 MainMenu.Gamble -> GambleView(viewModel)
                 MainMenu.Items -> ItemsView(viewModel)
                 MainMenu.Story -> StoryView(viewModel)
-                MainMenu.Settings -> SettingsView(userId, viewModel, onLogout, onSwitchAccount)
+                MainMenu.Settings -> SettingsView(
+                    userId = userId,
+                    viewModel = viewModel,
+                    bgmEnabled = bgmEnabled,
+                    bgmVolume = bgmVolume,
+                    onBgmEnabledChange = onBgmEnabledChange,
+                    onBgmVolumeChange = onBgmVolumeChange,
+                    onLogout = onLogout,
+                    onSwitchAccount = onSwitchAccount,
+                )
             }
         }
     }
@@ -348,6 +380,7 @@ private fun Page(
 
 @Composable
 private fun WorkView(viewModel: MainViewModel) {
+    val context = LocalContext.current
     val state by viewModel.workState.collectAsState()
     val user by viewModel.user.collectAsState()
     val rewardMultiplier = chapterRewardMultiplier(user?.chapter ?: 1)
@@ -366,6 +399,26 @@ private fun WorkView(viewModel: MainViewModel) {
     var moleHitEffects by remember { mutableStateOf(emptySet<Int>()) }
     var moleMissEffects by remember { mutableStateOf(emptySet<Int>()) }
     val moleEffectScope = rememberCoroutineScope()
+    var moleTts by remember { mutableStateOf<TextToSpeech?>(null) }
+    var moleTtsReady by remember { mutableStateOf(false) }
+
+    DisposableEffect(context) {
+        val engine = TextToSpeech(context.applicationContext) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                moleTts?.language = Locale.KOREAN
+                moleTts?.setPitch(1.65f)
+                moleTts?.setSpeechRate(1.35f)
+                moleTtsReady = true
+            }
+        }
+        moleTts = engine
+        onDispose {
+            engine.stop()
+            engine.shutdown()
+            moleTts = null
+            moleTtsReady = false
+        }
+    }
 
     LaunchedEffect(state.activeJob) {
         while (state.activeJob != null) {
@@ -388,11 +441,33 @@ private fun WorkView(viewModel: MainViewModel) {
         moleRunning = false
         val totalReward = Math.multiplyExact(moleHits.toLong(), moleRewardPerHit)
         viewModel.claimMoleReward(moleHits, moleRewardPerHit)
+        if (moleTtsReady) {
+            moleTts?.speak(
+                "결과 공개",
+                TextToSpeech.QUEUE_FLUSH,
+                null,
+                "mole_result_${System.currentTimeMillis()}",
+            )
+        }
         moleResult = "${moleHits}마리 성공 · ${totalReward.won()} 획득"
     }
 
     LaunchedEffect(moleCountdown) {
         val count = moleCountdown ?: return@LaunchedEffect
+        if (moleTtsReady) {
+            val countdownVoice = when (count) {
+                3 -> "쓰리"
+                2 -> "투"
+                1 -> "원"
+                else -> "스타트"
+            }
+            moleTts?.speak(
+                countdownVoice,
+                TextToSpeech.QUEUE_FLUSH,
+                null,
+                "mole_countdown_$count",
+            )
+        }
         if (count > 0) {
             delay(1_000)
             moleCountdown = count - 1
@@ -511,6 +586,14 @@ private fun WorkView(viewModel: MainViewModel) {
                         moleTargets = moleTargets - index
                         moleHitEffects = moleHitEffects + index
                         moleHits += 1
+                        if (moleTtsReady) {
+                            moleTts?.speak(
+                                "뀨웅",
+                                TextToSpeech.QUEUE_FLUSH,
+                                null,
+                                "mole_hit_${System.currentTimeMillis()}",
+                            )
+                        }
                         moleEffectScope.launch {
                             delay(320)
                             moleHitEffects = moleHitEffects - index
@@ -640,6 +723,15 @@ private fun MoleGameView(
     onMiss: (Int) -> Unit,
     onResetCount: () -> Unit,
 ) {
+    val gameScrollState = rememberScrollState()
+
+    LaunchedEffect(running, preparing) {
+        if (running || preparing) {
+            delay(80)
+            gameScrollState.animateScrollTo(gameScrollState.maxValue)
+        }
+    }
+
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(containerColor = Color(0xFFF4E6C9).copy(alpha = 0.94f)),
@@ -648,7 +740,10 @@ private fun MoleGameView(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(
+                    state = gameScrollState,
+                    enabled = !running && !preparing,
+                )
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -1243,9 +1338,41 @@ private fun InventorySlot(index: Int) {
 
 @Composable
 private fun GambleView(viewModel: MainViewModel) {
+    val context = LocalContext.current
     val pagerState = rememberPagerState(pageCount = { 3 })
     val scope = rememberCoroutineScope()
     val gameLabels = listOf("가위바위보", "1대1 섯다", "3장 섯다")
+    var gambleTts by remember { mutableStateOf<TextToSpeech?>(null) }
+    var gambleTtsReady by remember { mutableStateOf(false) }
+
+    DisposableEffect(context) {
+        val engine = TextToSpeech(context.applicationContext) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                gambleTts?.language = Locale.KOREAN
+                gambleTts?.setPitch(1.55f)
+                gambleTts?.setSpeechRate(1.2f)
+                gambleTtsReady = true
+            }
+        }
+        gambleTts = engine
+        onDispose {
+            engine.stop()
+            engine.shutdown()
+            gambleTts = null
+            gambleTtsReady = false
+        }
+    }
+    val speakResult: (String) -> Unit = { message ->
+        if (gambleTtsReady) {
+            gambleTts?.speak(
+                message,
+                TextToSpeech.QUEUE_FLUSH,
+                null,
+                "gamble_result_${System.currentTimeMillis()}",
+            )
+        }
+    }
+
     Box(Modifier.fillMaxSize()) {
         Image(
             painter = painterResource(R.drawable.gamble_background),
@@ -1272,9 +1399,9 @@ private fun GambleView(viewModel: MainViewModel) {
                 modifier = Modifier.fillMaxWidth().weight(1f),
             ) { page ->
                 when (page) {
-                    0 -> RpsGambleView(viewModel)
-                    1 -> SeotdaView(viewModel)
-                    else -> ThreeCardSeotdaView(viewModel)
+                    0 -> RpsGambleView(viewModel, speakResult)
+                    1 -> SeotdaView(viewModel, speakResult)
+                    else -> ThreeCardSeotdaView(viewModel, speakResult)
                 }
             }
         }
@@ -1282,7 +1409,7 @@ private fun GambleView(viewModel: MainViewModel) {
 }
 
 @Composable
-private fun RpsGambleView(viewModel: MainViewModel) {
+private fun RpsGambleView(viewModel: MainViewModel, speakResult: (String) -> Unit) {
     val user by viewModel.user.collectAsState()
     val state by viewModel.gambleState.collectAsState()
     val wagerOptions = GambleManager.baseWagersForChapter(user?.chapter ?: 1)
@@ -1297,6 +1424,17 @@ private fun RpsGambleView(viewModel: MainViewModel) {
     }
     LaunchedEffect(wagerOptions) {
         if (state.replayWager == 0L && wager !in wagerOptions) wager = wagerOptions[1]
+    }
+    LaunchedEffect(state.result) {
+        state.result?.let { result ->
+            speakResult(
+                when (result.outcome) {
+                    GambleOutcome.Win -> "이겼다"
+                    GambleOutcome.Lose -> "졌다"
+                    GambleOutcome.Draw -> "무승부"
+                },
+            )
+        }
     }
 
     Page {
@@ -1473,7 +1611,7 @@ private fun RpsGambleView(viewModel: MainViewModel) {
 }
 
 @Composable
-private fun SeotdaView(viewModel: MainViewModel) {
+private fun SeotdaView(viewModel: MainViewModel, speakResult: (String) -> Unit) {
     val user by viewModel.user.collectAsState()
     val seotdaOpponentNames = user?.let {
         listOf(it.seotdaName1, it.seotdaName2, it.seotdaName3)
@@ -1487,6 +1625,14 @@ private fun SeotdaView(viewModel: MainViewModel) {
     LaunchedEffect(wagerOptions) {
         if (!state.isPlaying && state.result == null && selectedBaseWager !in wagerOptions) {
             selectedBaseWager = wagerOptions[1]
+        }
+    }
+    LaunchedEffect(state.result, state.replayReason) {
+        when {
+            state.replayReason != null -> speakResult("다시하기")
+            state.result?.outcome == SeotdaOutcome.Win -> speakResult("이겼다")
+            state.result?.outcome == SeotdaOutcome.Lose -> speakResult("졌다")
+            state.result?.outcome == SeotdaOutcome.Draw -> speakResult("다시하기")
         }
     }
 
@@ -1729,7 +1875,7 @@ private fun SeotdaView(viewModel: MainViewModel) {
 }
 
 @Composable
-private fun ThreeCardSeotdaView(viewModel: MainViewModel) {
+private fun ThreeCardSeotdaView(viewModel: MainViewModel, speakResult: (String) -> Unit) {
     val user by viewModel.user.collectAsState()
     val seotdaOpponentNames = user?.let {
         listOf(it.seotdaName1, it.seotdaName2, it.seotdaName3)
@@ -1742,6 +1888,14 @@ private fun ThreeCardSeotdaView(viewModel: MainViewModel) {
     LaunchedEffect(wagerOptions) {
         if (!state.isPlaying && state.result == null && selectedBaseWager !in wagerOptions) {
             selectedBaseWager = wagerOptions[1]
+        }
+    }
+    LaunchedEffect(state.result, state.replayReason) {
+        when {
+            state.replayReason != null -> speakResult("다시하기")
+            state.result?.outcome == SeotdaOutcome.Win -> speakResult("이겼다")
+            state.result?.outcome == SeotdaOutcome.Lose -> speakResult("졌다")
+            state.result?.outcome == SeotdaOutcome.Draw -> speakResult("다시하기")
         }
     }
 
@@ -2207,6 +2361,7 @@ private fun SeotdaRankGuide() {
 
 @Composable
 private fun StoryView(viewModel: MainViewModel) {
+    val context = LocalContext.current
     val user by viewModel.user.collectAsState()
     val currentChapter = user?.chapter ?: 1
     val completed = currentChapter > storyChapters.size
@@ -2214,8 +2369,48 @@ private fun StoryView(viewModel: MainViewModel) {
     val season = (currentChapter - 1).coerceAtLeast(0) / 10 + 1
     val episode = (currentChapter - 1).coerceAtLeast(0) % 10 + 1
     var showClearDialog by remember { mutableStateOf(false) }
+    var storyTts by remember { mutableStateOf<TextToSpeech?>(null) }
+    var storyTtsReady by remember { mutableStateOf(false) }
+    var storyReading by remember { mutableStateOf(false) }
     val storyScrollState = rememberScrollState()
+
+    DisposableEffect(context) {
+        val mainHandler = Handler(Looper.getMainLooper())
+        val engine = TextToSpeech(context.applicationContext) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                storyTts?.language = Locale.KOREAN
+                storyTts?.setPitch(1.0f)
+                storyTts?.setSpeechRate(0.92f)
+                storyTtsReady = true
+            }
+        }
+        engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {
+                mainHandler.post { storyReading = true }
+            }
+
+            override fun onDone(utteranceId: String?) {
+                mainHandler.post { storyReading = false }
+            }
+
+            @Deprecated("Deprecated in Java")
+            override fun onError(utteranceId: String?) {
+                mainHandler.post { storyReading = false }
+            }
+        })
+        storyTts = engine
+        onDispose {
+            engine.stop()
+            engine.shutdown()
+            storyTts = null
+            storyTtsReady = false
+            storyReading = false
+        }
+    }
+
     LaunchedEffect(currentChapter) {
+        storyTts?.stop()
+        storyReading = false
         storyScrollState.scrollTo(0)
     }
 
@@ -2227,13 +2422,13 @@ private fun StoryView(viewModel: MainViewModel) {
             ) {
                 Column(Modifier.padding(20.dp)) {
                     if (completed) {
-                        Text("STORY 2 COMPLETE", color = MaterialTheme.colorScheme.primary,
+                        Text("STORY 3 COMPLETE", color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.ExtraBold)
                         Spacer(Modifier.height(8.dp))
                         Text("우리들의 무릉도원", style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.ExtraBold)
                         Spacer(Modifier.height(12.dp))
-                        Text("두 개의 스토리와 20개의 챕터를 모두 완료했습니다.\n무릉도원의 이야기는 단체방이 조용해지지 않는 한 계속됩니다.")
+                        Text("세 개의 스토리와 30개의 챕터를 모두 완료했습니다.\n멸망을 지나온 무릉도원의 이야기는 아직 끝나지 않았습니다.")
                     } else if (chapter != null) {
                         Text(
                             "STORY $season · CHAPTER $episode / 10",
@@ -2245,6 +2440,33 @@ private fun StoryView(viewModel: MainViewModel) {
                             fontWeight = FontWeight.ExtraBold)
                         Text(chapter.subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedButton(
+                            onClick = {
+                                if (storyReading) {
+                                    storyTts?.stop()
+                                    storyReading = false
+                                } else {
+                                    val storyText = buildString {
+                                        append(chapter.title)
+                                        append(". ")
+                                        append(chapter.subtitle)
+                                        append(". ")
+                                        append(renderStoryForUser(chapter.story, user?.userId.orEmpty()))
+                                    }
+                                    storyTts?.speak(
+                                        storyText,
+                                        TextToSpeech.QUEUE_FLUSH,
+                                        null,
+                                        "story_chapter_${chapter.number}",
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = storyTtsReady,
+                        ) {
+                            Text(if (storyReading) "■ 읽기 중지" else "▶ 스토리 읽어주기")
+                        }
                         Spacer(Modifier.height(14.dp))
                         HorizontalDivider()
                         Spacer(Modifier.height(14.dp))
@@ -2271,7 +2493,7 @@ private fun StoryView(viewModel: MainViewModel) {
                             enabled = (user?.money ?: 0L) >= chapter.clearCost,
                         ) {
                             Text(
-                                if (chapter.number == storyChapters.size) "스토리 2 최종 챕터 클리어"
+                                if (chapter.number == storyChapters.size) "스토리 $season 최종 챕터 클리어"
                                 else if (episode == 10) "스토리 $season 완료하고 다음 스토리 보기"
                                 else "클리어하고 다음 스토리 보기",
                             )
@@ -2290,7 +2512,7 @@ private fun StoryView(viewModel: MainViewModel) {
                 Text(
                     "${chapter.clearCost.won()}을 사용해 이 챕터를 클리어할까요?\n" +
                         if (chapter.number < storyChapters.size) "다음 이야기가 바로 열립니다."
-                        else "무릉도원의 첫 번째 이야기가 완결됩니다.",
+                        else "무릉도원의 세 번째 이야기가 완결됩니다.",
                 )
             },
             confirmButton = {
@@ -2310,6 +2532,10 @@ private fun StoryView(viewModel: MainViewModel) {
 private fun SettingsView(
     userId: String,
     viewModel: MainViewModel,
+    bgmEnabled: Boolean,
+    bgmVolume: Float,
+    onBgmEnabledChange: (Boolean) -> Unit,
+    onBgmVolumeChange: (Float) -> Unit,
     onLogout: () -> Unit,
     onSwitchAccount: (String) -> Unit,
 ) {
@@ -2318,6 +2544,8 @@ private fun SettingsView(
     var showAccounts by remember { mutableStateOf(false) }
     var showDbEditor by remember { mutableStateOf(false) }
     var showSeotdaNames by remember { mutableStateOf(false) }
+    var showCompletedStories by remember { mutableStateOf(false) }
+    var replayChapter by remember { mutableStateOf<StoryChapter?>(null) }
     var deleteTarget by remember { mutableStateOf<String?>(null) }
     var seotdaName1 by remember { mutableStateOf("") }
     var seotdaName2 by remember { mutableStateOf("") }
@@ -2332,7 +2560,9 @@ private fun SettingsView(
             contentScale = ContentScale.Crop,
             alpha = 0.5f,
         )
-        Column(Modifier.fillMaxSize().padding(24.dp)) {
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
+        ) {
             Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp)) {
                 Text(
                     "현재 계정",
@@ -2343,6 +2573,40 @@ private fun SettingsView(
                 )
                 Text(userId, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(20.dp)); HorizontalDivider(); Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("배경 음악", fontWeight = FontWeight.Bold)
+                        Text(
+                            if (bgmEnabled) "화면에 어울리는 음악을 재생합니다." else "배경 음악이 꺼져 있습니다.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = bgmEnabled, onCheckedChange = onBgmEnabledChange)
+                }
+                Text("음량 ${(bgmVolume * 100).roundToLong()}%", style = MaterialTheme.typography.labelMedium)
+                Slider(
+                    value = bgmVolume,
+                    onValueChange = onBgmVolumeChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = bgmEnabled,
+                    valueRange = 0f..1f,
+                )
+                HorizontalDivider(); Spacer(Modifier.height(12.dp))
+                OutlinedButton(
+                    onClick = { showCompletedStories = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = (user?.chapter ?: 1) > 1,
+                ) {
+                    Text(
+                        if ((user?.chapter ?: 1) > 1) "클리어한 스토리 다시보기"
+                        else "클리어한 스토리가 없습니다",
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
                 Button({ showAccounts = true }, Modifier.fillMaxWidth()) { Text("부캐로 이동") }
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
@@ -2357,6 +2621,96 @@ private fun SettingsView(
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(onLogout, Modifier.fillMaxWidth()) { Text("로그아웃") }
             }}
+        }
+    }
+
+    if (showCompletedStories) {
+        val completedChapters = storyChapters.take(
+            ((user?.chapter ?: 1) - 1).coerceIn(0, storyChapters.size),
+        )
+        AlertDialog(
+            onDismissRequest = { showCompletedStories = false },
+            title = { Text("클리어한 스토리") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 500.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    completedChapters.forEach { completedChapter ->
+                        val storyNumber = (completedChapter.number - 1) / 10 + 1
+                        val chapterNumber = (completedChapter.number - 1) % 10 + 1
+                        OutlinedButton(
+                            onClick = {
+                                replayChapter = completedChapter
+                                showCompletedStories = false
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                        ) {
+                            Column(Modifier.fillMaxWidth()) {
+                                Text(
+                                    "STORY $storyNumber · CHAPTER $chapterNumber",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                Text(
+                                    completedChapter.title,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCompletedStories = false }) { Text("닫기") }
+            },
+        )
+    }
+
+    replayChapter?.let { selectedChapter ->
+        val storyNumber = (selectedChapter.number - 1) / 10 + 1
+        val chapterNumber = (selectedChapter.number - 1) % 10 + 1
+        Dialog(
+            onDismissRequest = { replayChapter = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Card(
+                modifier = Modifier.fillMaxWidth().fillMaxHeight(0.9f).padding(horizontal = 18.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFCF7)),
+            ) {
+                Column(Modifier.fillMaxSize().padding(20.dp)) {
+                    Text(
+                        "STORY $storyNumber · CHAPTER $chapterNumber",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
+                    Text(
+                        selectedChapter.title,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
+                    Text(
+                        selectedChapter.subtitle,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    HorizontalDivider()
+                    Text(
+                        renderStoryForUser(selectedChapter.story, user?.userId.orEmpty()),
+                        modifier = Modifier.weight(1f).fillMaxWidth()
+                            .verticalScroll(rememberScrollState()).padding(vertical = 14.dp),
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Button(
+                        onClick = { replayChapter = null },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("닫기") }
+                }
+            }
         }
     }
 
