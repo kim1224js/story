@@ -544,7 +544,7 @@ private fun WorkView(
                 "mole_result_${System.currentTimeMillis()}",
             )
         }
-        moleResult = "${moleHits}마리 성공 · ${totalReward.won()} 획득"
+        moleResult = "${moleHits}마리 성공 · ${compactWon(totalReward.toDouble())} 획득"
     }
 
     LaunchedEffect(moleCountdown) {
@@ -751,7 +751,8 @@ private fun WorkView(
                             icePenguinFound = true
                             iceGameRunning = false
                             viewModel.claimIcePenguinReward(icePenguinReward)
-                            iceGameResult = "펭귄을 찾았습니다!\n${icePenguinReward.won()} 획득"
+                            iceGameResult =
+                                "펭귄을 찾았습니다!\n${compactWon(icePenguinReward.toDouble())} 획득"
                             moleEffectScope.launch {
                                 delay(180)
                                 iceToneGenerator.startTone(ToneGenerator.TONE_PROP_ACK, 450)
@@ -1001,7 +1002,7 @@ private fun MoleGameView(
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                "한 마리당 ${rewardPerHit.won()}",
+                "한 마리당 ${compactWon(rewardPerHit.toDouble())}",
                 color = Color(0xFF2E7D32),
                 fontWeight = FontWeight.Bold,
             )
@@ -1012,7 +1013,8 @@ private fun MoleGameView(
             ) {
                 Text("⏱ ${secondsLeft}초", fontWeight = FontWeight.ExtraBold)
                 Text("🎯 ${hits}마리", fontWeight = FontWeight.ExtraBold)
-                Text("💰 ${Math.multiplyExact(hits.toLong(), rewardPerHit).won()}",
+                Text(
+                    "💰 ${compactWon(Math.multiplyExact(hits.toLong(), rewardPerHit).toDouble())}",
                     fontWeight = FontWeight.ExtraBold)
             }
             Spacer(Modifier.height(10.dp))
@@ -1191,7 +1193,7 @@ private fun IcePenguinGameView(
                     horizontalArrangement = Arrangement.SpaceEvenly,
                 ) {
                     Text("🔨 남은 기회 $attemptsLeft / 5", fontWeight = FontWeight.ExtraBold)
-                    Text("🎁 ${reward.won()}", color = Color(0xFF00695C),
+                    Text("🎁 ${compactWon(reward.toDouble())}", color = Color(0xFF00695C),
                         fontWeight = FontWeight.ExtraBold)
                 }
                 Spacer(Modifier.height(10.dp))
@@ -1489,7 +1491,7 @@ private fun MazeGameView(
     val today = LocalDate.now().toString()
     val usedToday = if (state.mazeMoveDate == today) state.mazeMovesToday else 0
     val bonusToday = if (state.mazeMoveDate == today) state.mazeBonusMovesToday else 0
-    val dailyLimit = 20 + bonusToday
+    val dailyLimit = 50 + bonusToday
     val remaining = (dailyLimit - usedToday).coerceAtLeast(0)
     val currentCell = state.mazeY * MAZE_SIZE + state.mazeX
     val currentOpenings = maze.openings[currentCell]

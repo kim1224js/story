@@ -94,7 +94,7 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
         if (current.mazeSeed == 0L || current.mazeCompleted) return false
         val movesToday = if (current.mazeMoveDate == today) current.mazeMovesToday else 0
         val bonusToday = if (current.mazeMoveDate == today) current.mazeBonusMovesToday else 0
-        val dailyLimit = 20 + bonusToday
+        val dailyLimit = 50 + bonusToday
         if (movesToday >= dailyLimit) return false
         val isNewItem = itemId != null && itemId !in current.mazeCollectedItems
         val collected = if (isNewItem) current.mazeCollectedItems + itemId!!
