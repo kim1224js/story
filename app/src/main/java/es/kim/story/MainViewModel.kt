@@ -41,10 +41,24 @@ import javax.inject.Inject
     fun startJob(job: PartTimeJob) = workManager.start(job)
     fun cancelJob() = workManager.cancel()
     fun startMoleGame(): Boolean = workManager.startMoleGame()
-    fun resetMoleGameCount() = viewModelScope.launch {
-        if (!workManager.canResetMoleGame()) return@launch
-        if (repository.settleGamble(MOLE_GAME_RESET_COST, 0L)) {
-            workManager.resetMoleGame()
+    fun startIceGame(): Boolean = workManager.startIceGame()
+    fun ensureMaze() = workManager.ensureMaze()
+    fun moveMaze(targetX: Int, targetY: Int, itemId: Int?): Boolean =
+        workManager.moveMaze(targetX, targetY, itemId)
+    fun completeMaze(reward: Long) {
+        if (reward <= 0 || !workManager.completeMaze()) return
+        val currentUser = user.value ?: return
+        viewModelScope.launch { repository.addMoney(currentUser.userId, reward) }
+    }
+    fun startNewMaze() = workManager.startNewMaze()
+    fun resetMazeMoves(cost: Long, onResult: (Boolean) -> Unit) {
+        if (cost <= 0 || workState.value.mazeCompleted) return onResult(false)
+        viewModelScope.launch {
+            if (!repository.spendMoney(cost)) {
+                onResult(false)
+                return@launch
+            }
+            onResult(workManager.resetMazeMovesToday())
         }
     }
     fun claimMoleReward(hits: Int, rewardPerHit: Long) {
@@ -54,10 +68,14 @@ import javax.inject.Inject
             repository.addMoney(currentUser.userId, Math.multiplyExact(hits.toLong(), rewardPerHit))
         }
     }
+    fun claimIcePenguinReward(reward: Long) {
+        if (reward <= 0) return
+        val currentUser = user.value ?: return
+        viewModelScope.launch { repository.addMoney(currentUser.userId, reward) }
+    }
     fun claimJob(job: PartTimeJob) {
         val currentUser = user.value ?: return
-        val multiplier = chapterRewardMultiplier(currentUser.chapter)
-        val reward = Math.multiplyExact(job.reward, multiplier)
+        val reward = scaledChapterReward(job.reward, currentUser.chapter)
         if (workManager.claim(job)) viewModelScope.launch {
             repository.addMoney(currentUser.userId, reward)
         }
@@ -66,8 +84,7 @@ import javax.inject.Inject
         runCatching { stepQuestManager.refresh() }
     }
     fun claimStepQuest(quest: StepQuest, moreRewardApplied: Boolean = false) = viewModelScope.launch {
-        val multiplier = chapterRewardMultiplier(user.value?.chapter ?: 1)
-        val chapterReward = Math.multiplyExact(quest.reward, multiplier)
+        val chapterReward = scaledChapterReward(quest.reward, user.value?.chapter ?: 1)
         val reward = if (moreRewardApplied) chapterReward + chapterReward / 2 else chapterReward
         stepQuestManager.claim(quest, reward)
     }
@@ -87,15 +104,23 @@ import javax.inject.Inject
     }
     fun acknowledgeGambleResult() = gambleManager.acknowledgeResult()
     fun resetRpsCount() = viewModelScope.launch { gambleManager.resetRpsCount() }
-    fun startSeotda(baseWager: Long, playerCount: Int) =
-        viewModelScope.launch { gambleManager.startSeotda(baseWager, playerCount) }
+    fun startSeotda(
+        baseWager: Long,
+        playerCount: Int,
+        betCurrency: SeotdaBetCurrency = SeotdaBetCurrency.Money,
+    ) = viewModelScope.launch { gambleManager.startSeotda(baseWager, playerCount, betCurrency) }
     fun raiseSeotda() = viewModelScope.launch { gambleManager.raiseSeotda() }
     fun showDownSeotda() = viewModelScope.launch { gambleManager.showDownSeotda() }
     fun acknowledgeSeotdaResult() = gambleManager.acknowledgeSeotdaResult()
     fun acknowledgeSeotdaReplay() = gambleManager.acknowledgeSeotdaReplay()
     fun resetSeotdaCount() = viewModelScope.launch { gambleManager.resetSeotdaCount() }
-    fun startThreeCardSeotda(baseWager: Long, playerCount: Int) =
-        viewModelScope.launch { gambleManager.startThreeCardSeotda(baseWager, playerCount) }
+    fun startThreeCardSeotda(
+        baseWager: Long,
+        playerCount: Int,
+        betCurrency: SeotdaBetCurrency = SeotdaBetCurrency.Money,
+    ) = viewModelScope.launch {
+        gambleManager.startThreeCardSeotda(baseWager, playerCount, betCurrency)
+    }
     fun raiseThreeCardSeotda() = viewModelScope.launch { gambleManager.raiseThreeCardSeotda() }
     fun showDownThreeCardSeotda() = viewModelScope.launch { gambleManager.showDownThreeCardSeotda() }
     fun toggleThreeCardSelection(index: Int) = gambleManager.toggleThreeCardSelection(index)
@@ -109,6 +134,10 @@ import javax.inject.Inject
     fun updateSeotdaNames(names: List<String>) = viewModelScope.launch {
         repository.updateSeotdaNames(names)
     }
+    fun exchangeBlueChip(onSuccess: () -> Unit = {}) = viewModelScope.launch {
+        if (repository.exchangeBlueChip()) onSuccess()
+    }
+    fun buyPremiumIdColor() = viewModelScope.launch { repository.buyPremiumIdColor() }
     fun clearStoryChapter(chapter: Int, cost: Long) = viewModelScope.launch {
         repository.clearStoryChapter(chapter, cost)
     }

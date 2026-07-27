@@ -31,6 +31,8 @@ import javax.inject.Singleton
     }
     suspend fun addMoney(amount: Long) = dao.addMoney(activeUserId.value, amount)
     suspend fun addMoney(userId: String, amount: Long) = dao.addMoney(userId, amount)
+    suspend fun spendMoney(amount: Long): Boolean =
+        amount > 0 && dao.spendMoney(activeUserId.value, amount) == 1
     suspend fun updateSeotdaNames(names: List<String>): Boolean {
         if (names.size != 3 || names.any { it.isBlank() }) return false
         dao.updateSeotdaNames(
@@ -48,6 +50,13 @@ import javax.inject.Singleton
     suspend fun updateGender(gender: String) = dao.updateGender(activeUserId.value, gender)
     suspend fun settleGamble(wager: Long, payout: Long) =
         dao.settleGamble(activeUserId.value, wager, payout)
+    suspend fun settleBlueChipGamble(wager: Long, payout: Long) =
+        dao.settleBlueChipGamble(activeUserId.value, wager, payout)
+    suspend fun addBlueChips(amount: Long) = dao.addBlueChips(activeUserId.value, amount)
+    suspend fun exchangeBlueChip(): Boolean =
+        dao.exchangeBlueChip(activeUserId.value, BLUE_CHIP_EXCHANGE_COST) == 1
+    suspend fun buyPremiumIdColor(): Boolean =
+        dao.buyPremiumIdColor(activeUserId.value, PREMIUM_ID_COLOR_COST) == 1
     suspend fun clearStoryChapter(chapter: Int, cost: Long): Boolean =
         dao.clearStoryChapter(activeUserId.value, chapter, cost) == 1
     suspend fun updateCurrentField(column: String, value: String): Boolean = when (column.lowercase()) {
@@ -65,5 +74,7 @@ import javax.inject.Singleton
 
     companion object {
         const val MAX_ACCOUNTS = 3
+        const val BLUE_CHIP_EXCHANGE_COST = 1_000_000_000_000_000L
+        const val PREMIUM_ID_COLOR_COST = 100L
     }
 }

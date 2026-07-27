@@ -27,6 +27,20 @@ import kotlinx.coroutines.flow.Flow
     suspend fun updateSeotdaNames(userId: String, name1: String, name2: String, name3: String)
     @Query("UPDATE user SET money = money - :amount WHERE userId = :userId AND money >= :amount")
     suspend fun spendMoney(userId: String, amount: Long): Int
+    @Query("UPDATE user SET blueChips = blueChips + :amount WHERE userId = :userId")
+    suspend fun addBlueChips(userId: String, amount: Long)
+    @Query("UPDATE user SET blueChips = blueChips - :amount WHERE userId = :userId AND blueChips >= :amount")
+    suspend fun spendBlueChips(userId: String, amount: Long): Int
+    @Query(
+        "UPDATE user SET money = money - :moneyCost, blueChips = blueChips + 1 " +
+            "WHERE userId = :userId AND money >= :moneyCost",
+    )
+    suspend fun exchangeBlueChip(userId: String, moneyCost: Long): Int
+    @Query(
+        "UPDATE user SET blueChips = blueChips - :chipCost, premiumIdColor = 1 " +
+            "WHERE userId = :userId AND blueChips >= :chipCost AND premiumIdColor = 0",
+    )
+    suspend fun buyPremiumIdColor(userId: String, chipCost: Long): Int
     @Query(
         "UPDATE user SET money = money - :cost, chapter = chapter + 1 " +
             "WHERE userId = :userId AND chapter = :chapter AND money >= :cost",
@@ -37,6 +51,12 @@ import kotlinx.coroutines.flow.Flow
     suspend fun settleGamble(userId: String, wager: Long, payout: Long): Boolean {
         if (spendMoney(userId, wager) != 1) return false
         if (payout > 0) addMoney(userId, payout)
+        return true
+    }
+    @Transaction
+    suspend fun settleBlueChipGamble(userId: String, wager: Long, payout: Long): Boolean {
+        if (spendBlueChips(userId, wager) != 1) return false
+        if (payout > 0) addBlueChips(userId, payout)
         return true
     }
 }

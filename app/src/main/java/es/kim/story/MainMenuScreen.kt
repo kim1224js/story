@@ -1,6 +1,9 @@
 package es.kim.story
 
 import android.content.Intent
+import android.media.AudioManager
+import android.media.SoundPool
+import android.media.ToneGenerator
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -24,11 +27,13 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Brush
@@ -48,9 +53,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlin.math.roundToLong
+import kotlin.random.Random
 import java.text.NumberFormat
 import java.time.LocalDate
 import java.util.Locale
+import java.util.Random as JavaRandom
 
 private enum class MainMenu(val label: String, val icon: String, val title: String, val description: String) {
     Work("알바", "💼", "알바", "한 번에 한 개의 알바만 진행할 수 있어요"),
@@ -75,6 +82,7 @@ fun MainMenuScreen(
     onSwitchAccount: (String) -> Unit,
 ) {
     var selected by remember { mutableStateOf(MainMenu.Story) }
+    var openDbEditorRequested by remember { mutableStateOf(false) }
     val user by viewModel.user.collectAsState()
     LaunchedEffect(selected, user?.chapter) {
         onBgmTrackChange(
@@ -109,19 +117,23 @@ fun MainMenuScreen(
                                 IdentityHeader(
                                     userId = user?.userId ?: userId,
                                     gender = user?.gender ?: "남성",
+                                    premiumIdColor = user?.premiumIdColor == true,
                                     modifier = Modifier.fillMaxWidth(),
                                     onChangeGender = { viewModel.changeGender(user?.gender ?: "남성") },
                                 )
                             }
                             NotebookHeaderCard(
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.weight(1f).clickable {
+                                    openDbEditorRequested = true
+                                    selected = MainMenu.Settings
+                                },
                                 containerColor = Color(0xFFFCE4EC),
                                 accentColor = Color(0xFFD81B60),
                             ) {
                                 HeaderValue(
                                     "스토리 챕터",
                                     if ((user?.chapter ?: 1) > storyChapters.size) {
-                                        "STORY 3 완료"
+                                        "STORY ${(storyChapters.size - 1) / 10 + 1} 완료"
                                     } else {
                                         val progress = user?.chapter ?: 1
                                         "STORY ${(progress - 1) / 10 + 1} · CH.${(progress - 1) % 10 + 1}"
@@ -163,7 +175,7 @@ fun MainMenuScreen(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (selected) {
-                MainMenu.Work -> WorkView(viewModel)
+                MainMenu.Work -> WorkView(viewModel, onBgmTrackChange)
                 MainMenu.Settlement -> SettlementView(viewModel)
                 MainMenu.Gamble -> GambleView(viewModel)
                 MainMenu.Items -> ItemsView(viewModel)
@@ -175,6 +187,8 @@ fun MainMenuScreen(
                     bgmVolume = bgmVolume,
                     onBgmEnabledChange = onBgmEnabledChange,
                     onBgmVolumeChange = onBgmVolumeChange,
+                    openDbEditor = openDbEditorRequested,
+                    onDbEditorClosed = { openDbEditorRequested = false },
                     onLogout = onLogout,
                     onSwitchAccount = onSwitchAccount,
                 )
@@ -243,11 +257,53 @@ private fun HeaderValue(label: String, value: String, modifier: Modifier, alignm
 }
 
 @Composable
-private fun IdentityHeader(userId: String, gender: String, modifier: Modifier, onChangeGender: () -> Unit) {
+private fun IdentityHeader(
+    userId: String,
+    gender: String,
+    premiumIdColor: Boolean,
+    modifier: Modifier,
+    onChangeGender: () -> Unit,
+) {
     Column(modifier) {
-        Text("아이디", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (premiumIdColor) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    color = Color(0xFF251207),
+                    shape = RoundedCornerShape(6.dp),
+                    border = BorderStroke(1.dp, Color(0xFFFFC107)),
+                    shadowElevation = 2.dp,
+                ) {
+                    Text(
+                        "♠ 도박의 신 ♠",
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                        color = Color(0xFFFFD54F),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(userId, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(
+                userId,
+                style = if (premiumIdColor) {
+                    MaterialTheme.typography.bodyMedium.copy(
+                        brush = Brush.linearGradient(
+                            listOf(
+                                Color(0xFF7A3E00),
+                                Color(0xFFFFB300),
+                                Color(0xFFFFE082),
+                                Color(0xFFD06B00),
+                            ),
+                        ),
+                    )
+                } else {
+                    MaterialTheme.typography.bodyMedium
+                },
+                fontWeight = FontWeight.ExtraBold,
+                maxLines = 1,
+            )
             Spacer(Modifier.width(4.dp))
             Text(
                 gender,
@@ -379,7 +435,10 @@ private fun Page(
 }
 
 @Composable
-private fun WorkView(viewModel: MainViewModel) {
+private fun WorkView(
+    viewModel: MainViewModel,
+    onBgmTrackChange: (Int) -> Unit,
+) {
     val context = LocalContext.current
     val state by viewModel.workState.collectAsState()
     val user by viewModel.user.collectAsState()
@@ -398,6 +457,21 @@ private fun WorkView(viewModel: MainViewModel) {
     var moleCountdown by remember { mutableStateOf<Int?>(null) }
     var moleHitEffects by remember { mutableStateOf(emptySet<Int>()) }
     var moleMissEffects by remember { mutableStateOf(emptySet<Int>()) }
+    var moleInputLocked by remember { mutableStateOf(false) }
+    var iceGameRunning by remember { mutableStateOf(false) }
+    var icePenguinIndex by remember { mutableIntStateOf(-1) }
+    var brokenIceCells by remember { mutableStateOf(emptySet<Int>()) }
+    var iceAttemptsLeft by remember { mutableIntStateOf(5) }
+    var iceGameResult by remember { mutableStateOf<String?>(null) }
+    var icePenguinFound by remember { mutableStateOf(false) }
+    var mazeResult by remember { mutableStateOf<String?>(null) }
+    val icePenguinReward = (currentClearCost / 10L).coerceAtLeast(1L)
+    val iceToneGenerator = remember { ToneGenerator(AudioManager.STREAM_MUSIC, 85) }
+    val mazeToneGenerator = remember { ToneGenerator(AudioManager.STREAM_MUSIC, 72) }
+    val iceSoundPool = remember { SoundPool.Builder().setMaxStreams(3).build() }
+    val iceCrackSound = remember(iceSoundPool) {
+        iceSoundPool.load(context, R.raw.sfx_ice_crack, 1)
+    }
     val moleEffectScope = rememberCoroutineScope()
     var moleTts by remember { mutableStateOf<TextToSpeech?>(null) }
     var moleTtsReady by remember { mutableStateOf(false) }
@@ -420,6 +494,26 @@ private fun WorkView(viewModel: MainViewModel) {
         }
     }
 
+    DisposableEffect(iceToneGenerator) {
+        onDispose { iceToneGenerator.release() }
+    }
+    DisposableEffect(mazeToneGenerator) {
+        onDispose { mazeToneGenerator.release() }
+    }
+    DisposableEffect(iceSoundPool) {
+        onDispose { iceSoundPool.release() }
+    }
+
+    LaunchedEffect(workTab) {
+        onBgmTrackChange(
+            when (workTab) {
+                2 -> R.raw.bgm_bells_of_winter
+                3 -> R.raw.bgm_creed_of_course
+                else -> R.raw.bgm_jaunt
+            },
+        )
+    }
+
     LaunchedEffect(state.activeJob) {
         while (state.activeJob != null) {
             now = System.currentTimeMillis()
@@ -437,6 +531,7 @@ private fun WorkView(viewModel: MainViewModel) {
         moleTargets = emptySet()
         moleHitEffects = emptySet()
         moleMissEffects = emptySet()
+        moleInputLocked = false
         moleSecondsLeft = 0
         moleRunning = false
         val totalReward = Math.multiplyExact(moleHits.toLong(), moleRewardPerHit)
@@ -490,6 +585,16 @@ private fun WorkView(viewModel: MainViewModel) {
                 onClick = { workTab = 1 },
                 text = { Text("름명보 잡기") },
             )
+            Tab(
+                selected = workTab == 2,
+                onClick = { if (!moleRunning && moleCountdown == null) workTab = 2 },
+                text = { Text("얼음 깨기") },
+            )
+            Tab(
+                selected = workTab == 3,
+                onClick = { if (!moleRunning && moleCountdown == null) workTab = 3 },
+                text = { Text("미로") },
+            )
         }
         Spacer(Modifier.height(12.dp))
         if (workTab == 0) {
@@ -500,7 +605,7 @@ private fun WorkView(viewModel: MainViewModel) {
                     partTimeJobs.filter { it.id == active.jobId }
                 } ?: partTimeJobs
                 visibleJobs.forEach { job ->
-                    val scaledReward = Math.multiplyExact(job.reward, rewardMultiplier)
+                    val scaledReward = scaledChapterReward(job.reward, user?.chapter ?: 1)
                     val active = state.activeJob
                     val isActive = active?.jobId == job.id
                     val finishAt = (active?.startedAt ?: now) + job.durationMillis
@@ -536,8 +641,8 @@ private fun WorkView(viewModel: MainViewModel) {
                             Column(Modifier.padding(18.dp)) {
                                 Text(job.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                 Text(
-                                    "${job.durationLabel} · ${scaledReward.won()} " +
-                                        "(×${rewardMultiplier.formattedNumber()})",
+                                    "${job.durationLabel} · ${compactWon(scaledReward.toDouble())} " +
+                                        "(×${rewardMultiplierLabel(rewardMultiplier)})",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                                 Spacer(Modifier.height(12.dp))
@@ -557,7 +662,7 @@ private fun WorkView(viewModel: MainViewModel) {
                     }
                 }
             }
-        } else {
+        } else if (workTab == 1) {
             MoleGameView(
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 running = moleRunning,
@@ -568,7 +673,6 @@ private fun WorkView(viewModel: MainViewModel) {
                 missEffects = moleMissEffects,
                 hits = moleHits,
                 playsToday = state.molePlaysToday,
-                money = user?.money ?: 0L,
                 rewardPerHit = moleRewardPerHit,
                 onStart = {
                     if (viewModel.startMoleGame()) {
@@ -577,12 +681,13 @@ private fun WorkView(viewModel: MainViewModel) {
                         moleTargets = emptySet()
                         moleHitEffects = emptySet()
                         moleMissEffects = emptySet()
+                        moleInputLocked = false
                         moleResult = null
                         moleCountdown = 3
                     }
                 },
                 onHit = { index ->
-                    if (moleRunning && index in moleTargets) {
+                    if (moleRunning && !moleInputLocked && index in moleTargets) {
                         moleTargets = moleTargets - index
                         moleHitEffects = moleHitEffects + index
                         moleHits += 1
@@ -601,15 +706,104 @@ private fun WorkView(viewModel: MainViewModel) {
                     }
                 },
                 onMiss = { index ->
-                    if (moleRunning && index !in moleTargets) {
+                    if (moleRunning && !moleInputLocked && index !in moleTargets) {
+                        moleInputLocked = true
                         moleMissEffects = moleMissEffects + index
                         moleEffectScope.launch {
-                            delay(180)
+                            delay(500)
                             moleMissEffects = moleMissEffects - index
+                            moleInputLocked = false
                         }
                     }
                 },
-                onResetCount = viewModel::resetMoleGameCount,
+            )
+        } else if (workTab == 2) {
+            IcePenguinGameView(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                running = iceGameRunning,
+                attemptsLeft = iceAttemptsLeft,
+                brokenCells = brokenIceCells,
+                penguinIndex = icePenguinIndex,
+                penguinFound = icePenguinFound,
+                playsToday = state.icePlaysToday,
+                reward = icePenguinReward,
+                onStart = {
+                    if (viewModel.startIceGame()) {
+                        val continuing = brokenIceCells.isNotEmpty() &&
+                            !icePenguinFound &&
+                            iceAttemptsLeft == 0
+                        if (!continuing) {
+                            icePenguinIndex = Random.nextInt(25)
+                            brokenIceCells = emptySet()
+                        }
+                        iceAttemptsLeft = 5
+                        icePenguinFound = false
+                        iceGameResult = null
+                        iceGameRunning = true
+                    }
+                },
+                onBreakIce = { index ->
+                    if (iceGameRunning && index !in brokenIceCells) {
+                        iceSoundPool.play(iceCrackSound, 1f, 1f, 1, 0, 1.08f)
+                        brokenIceCells = brokenIceCells + index
+                        iceAttemptsLeft -= 1
+                        if (index == icePenguinIndex) {
+                            icePenguinFound = true
+                            iceGameRunning = false
+                            viewModel.claimIcePenguinReward(icePenguinReward)
+                            iceGameResult = "펭귄을 찾았습니다!\n${icePenguinReward.won()} 획득"
+                            moleEffectScope.launch {
+                                delay(180)
+                                iceToneGenerator.startTone(ToneGenerator.TONE_PROP_ACK, 450)
+                                if (moleTtsReady) {
+                                    moleTts?.speak(
+                                        "축하해요! 펭귄을 찾았어요!",
+                                        TextToSpeech.QUEUE_FLUSH,
+                                        null,
+                                        "ice_penguin_success_${System.currentTimeMillis()}",
+                                    )
+                                }
+                            }
+                        } else if (iceAttemptsLeft == 0) {
+                            iceGameRunning = false
+                            iceGameResult = if (state.icePlaysToday < 5) {
+                                "펭귄을 찾지 못했습니다.\n같은 얼음판에서 이어서 찾아보세요!"
+                            } else {
+                                "펭귄을 찾지 못했습니다.\n오늘의 도전 횟수를 모두 사용했습니다."
+                            }
+                        }
+                    }
+                },
+            )
+        } else {
+            LaunchedEffect(user?.userId) { viewModel.ensureMaze() }
+            MazeGameView(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                state = state,
+                money = user?.money ?: 0L,
+                reward = currentClearCost,
+                onMove = { dx, dy, itemId ->
+                    val targetX = state.mazeX + dx
+                    val targetY = state.mazeY + dy
+                    if (viewModel.moveMaze(targetX, targetY, itemId)) {
+                        mazeToneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 65)
+                        if (targetX == 49 && targetY == 49) {
+                            viewModel.completeMaze(currentClearCost)
+                            mazeToneGenerator.startTone(ToneGenerator.TONE_PROP_ACK, 650)
+                            mazeResult = "미로 탈출 성공!\n${currentClearCost.won()} 획득"
+                        }
+                    }
+                },
+                onNewMaze = viewModel::startNewMaze,
+                onResetMoves = { cost ->
+                    viewModel.resetMazeMoves(cost) { success ->
+                        mazeResult = if (success) {
+                            "미로 이동 횟수를 초기화했습니다."
+                        } else {
+                            "재화가 부족하거나 초기화할 수 없습니다."
+                        }
+                    }
+                },
             )
         }
     }
@@ -687,6 +881,56 @@ private fun WorkView(viewModel: MainViewModel) {
         )
     }
 
+    iceGameResult?.let { result ->
+        AlertDialog(
+            onDismissRequest = {},
+            properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+            title = {
+                Text(
+                    if (icePenguinFound) "🐧 펭귄 발견!" else "🧊 도전 실패",
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                    fontWeight = FontWeight.ExtraBold,
+                )
+            },
+            text = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (icePenguinFound) {
+                        Image(
+                            painter = painterResource(R.drawable.penguin_found),
+                            contentDescription = "찾은 펭귄",
+                            modifier = Modifier.size(180.dp),
+                            contentScale = ContentScale.Fit,
+                        )
+                    }
+                    Text(result, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold)
+                }
+            },
+            confirmButton = {
+                Button(onClick = { iceGameResult = null }) { Text("확인") }
+            },
+        )
+    }
+
+    mazeResult?.let { result ->
+        AlertDialog(
+            onDismissRequest = {},
+            title = {
+                Text(
+                    if (result.startsWith("미로 탈출 성공")) "🏆 미로 탈출!"
+                    else "🧭 미로 안내",
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                    fontWeight = FontWeight.ExtraBold,
+                )
+            },
+            text = { Text(result, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) },
+            confirmButton = {
+                Button(onClick = { mazeResult = null }) { Text("확인") }
+            },
+        )
+    }
+
     claimDialogJob?.let { job ->
         AlertDialog(
             onDismissRequest = { claimDialogJob = null },
@@ -694,7 +938,7 @@ private fun WorkView(viewModel: MainViewModel) {
             text = {
                 Text(
                     "${job.title}을 완료했습니다.\n" +
-                        "${Math.multiplyExact(job.reward, rewardMultiplier).won()}을 받을까요?",
+                        "${compactWon(scaledChapterReward(job.reward, user?.chapter ?: 1).toDouble())}을 받을까요?",
                 )
             },
             confirmButton = {
@@ -716,12 +960,10 @@ private fun MoleGameView(
     missEffects: Set<Int>,
     hits: Int,
     playsToday: Int,
-    money: Long,
     rewardPerHit: Long,
     onStart: () -> Unit,
     onHit: (Int) -> Unit,
     onMiss: (Int) -> Unit,
-    onResetCount: () -> Unit,
 ) {
     val gameScrollState = rememberScrollState()
 
@@ -754,7 +996,7 @@ private fun MoleGameView(
                 color = Color(0xFF4E342E),
             )
             Text(
-                "60초 동안 0.5초마다 2마리 · 오늘 $playsToday / 5회",
+                "60초 동안 0.5초마다 2마리 · 오늘 $playsToday / 10회",
                 color = Color(0xFF6D4C41),
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -879,36 +1121,614 @@ private fun MoleGameView(
             Button(
                 onClick = onStart,
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !running && !preparing && playsToday < 5,
+                enabled = !running && !preparing && playsToday < 10,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5D4037)),
             ) {
                 Text(
                     when {
                         running -> "게임 진행 중"
                         preparing -> "게임 준비 중"
-                        playsToday >= 5 -> "오늘 5회 완료"
-                        else -> "게임 시작 (${5 - playsToday}회 남음)"
+                        playsToday >= 10 -> "오늘 10회 완료"
+                        else -> "게임 시작 (${10 - playsToday}회 남음)"
                     },
                 )
             }
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = onResetCount,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !running && !preparing && playsToday > 0 && money >= MOLE_GAME_RESET_COST,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF5D4037)),
-                border = BorderStroke(1.dp, Color(0xFF795548)),
+        }
+    }
+}
+
+private val IceHexagonShape = GenericShape { size, _ ->
+    moveTo(size.width * 0.25f, 0f)
+    lineTo(size.width * 0.75f, 0f)
+    lineTo(size.width, size.height * 0.5f)
+    lineTo(size.width * 0.75f, size.height)
+    lineTo(size.width * 0.25f, size.height)
+    lineTo(0f, size.height * 0.5f)
+    close()
+}
+
+@Composable
+private fun IcePenguinGameView(
+    modifier: Modifier,
+    running: Boolean,
+    attemptsLeft: Int,
+    brokenCells: Set<Int>,
+    penguinIndex: Int,
+    penguinFound: Boolean,
+    playsToday: Int,
+    reward: Long,
+    onStart: () -> Unit,
+    onBreakIce: (Int) -> Unit,
+) {
+    Column(
+        modifier.verticalScroll(rememberScrollState()).padding(horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp),
+            border = BorderStroke(2.dp, Color(0xFF81D4FA)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFE1F5FE).copy(alpha = 0.96f)),
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text("100만원 내고 횟수 초기화")
-            }
-            if (!running && !preparing && playsToday > 0 && money < MOLE_GAME_RESET_COST) {
                 Text(
-                    "보유 재화가 부족합니다.",
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
+                    "🔨 얼음 속 펭귄 찾기",
+                    color = Color(0xFF01579B),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.ExtraBold,
+                )
+                Text(
+                    "25개의 얼음 중 하나에 펭귄이 숨어 있어요! · 오늘 $playsToday / 5회",
+                    color = Color(0xFF456A7D),
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    Text("🔨 남은 기회 $attemptsLeft / 5", fontWeight = FontWeight.ExtraBold)
+                    Text("🎁 ${reward.won()}", color = Color(0xFF00695C),
+                        fontWeight = FontWeight.ExtraBold)
+                }
+                Spacer(Modifier.height(10.dp))
+
+                Column(
+                    Modifier.fillMaxWidth().background(
+                        Brush.verticalGradient(listOf(Color(0xFFB3E5FC), Color(0xFFE8F8FF))),
+                        RoundedCornerShape(18.dp),
+                    ).padding(vertical = 10.dp, horizontal = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy((-5).dp),
+                ) {
+                    repeat(5) { row ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(
+                                start = if (row % 2 == 1) 17.dp else 0.dp,
+                                end = if (row % 2 == 1) 0.dp else 17.dp,
+                            ),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            repeat(5) { column ->
+                                val index = row * 5 + column
+                                val broken = index in brokenCells
+                                val foundHere = broken && index == penguinIndex
+                                Box(
+                                    modifier = Modifier.weight(1f).aspectRatio(1f)
+                                        .clip(IceHexagonShape)
+                                        .background(
+                                            when {
+                                                foundHere -> Color(0xFFFFF8E1)
+                                                broken -> Color(0xFF35586A)
+                                                else -> Color(0xFF66D1F5)
+                                            },
+                                        )
+                                        .border(
+                                            2.dp,
+                                            if (broken) Color(0xFF37474F) else Color.White,
+                                            IceHexagonShape,
+                                        )
+                                        .clickable(enabled = running && !broken) { onBreakIce(index) },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    when {
+                                        foundHere -> Image(
+                                            painter = painterResource(R.drawable.penguin_found),
+                                            contentDescription = "펭귄",
+                                            modifier = Modifier.fillMaxSize().padding(2.dp),
+                                            contentScale = ContentScale.Fit,
+                                        )
+                                        else -> IceCellArtwork(broken = broken, seed = index)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = onStart,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !running && playsToday < 5,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0277BD)),
+                ) {
+                    Text(
+                        when {
+                            brokenCells.isEmpty() || penguinFound -> "게임 시작"
+                            attemptsLeft == 0 -> "같은 얼음판 이어서 찾기"
+                            else -> "게임 시작"
+                        },
+                    )
+                }
+                if (running) {
+                    Text("깨고 싶은 얼음을 눌러주세요.",
+                        color = Color(0xFF01579B), fontWeight = FontWeight.Bold)
+                } else if (penguinFound) {
+                    Text("펭귄을 찾았어요!", color = Color(0xFF00897B),
+                        fontWeight = FontWeight.ExtraBold)
+                } else if (playsToday >= 5) {
+                    Text("오늘의 5번을 모두 사용했습니다.",
+                        color = Color(0xFFC62828), fontWeight = FontWeight.ExtraBold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun IceCellArtwork(broken: Boolean, seed: Int) {
+    Canvas(Modifier.fillMaxSize().padding(3.dp)) {
+        val w = size.width
+        val h = size.height
+        val center = Offset(w * (0.46f + (seed % 3) * 0.02f), h * 0.52f)
+
+        if (!broken) {
+            val upperFacet = Path().apply {
+                moveTo(w * 0.12f, h * 0.48f)
+                lineTo(w * 0.3f, h * 0.12f)
+                lineTo(w * 0.67f, h * 0.08f)
+                lineTo(w * 0.5f, h * 0.54f)
+                close()
+            }
+            drawPath(upperFacet, Color.White.copy(alpha = 0.32f))
+
+            val lowerFacet = Path().apply {
+                moveTo(w * 0.13f, h * 0.52f)
+                lineTo(w * 0.5f, h * 0.54f)
+                lineTo(w * 0.72f, h * 0.9f)
+                lineTo(w * 0.3f, h * 0.87f)
+                close()
+            }
+            drawPath(lowerFacet, Color(0xFF0288D1).copy(alpha = 0.17f))
+
+            val rightFacet = Path().apply {
+                moveTo(w * 0.5f, h * 0.54f)
+                lineTo(w * 0.68f, h * 0.09f)
+                lineTo(w * 0.91f, h * 0.5f)
+                lineTo(w * 0.72f, h * 0.89f)
+                close()
+            }
+            drawPath(rightFacet, Color(0xFFB3E5FC).copy(alpha = 0.3f))
+
+            drawLine(
+                Color.White.copy(alpha = 0.92f),
+                Offset(w * 0.27f, h * 0.18f),
+                Offset(w * 0.55f, h * 0.11f),
+                strokeWidth = 2.2.dp.toPx(),
+            )
+            drawLine(
+                Color.White.copy(alpha = 0.58f),
+                Offset(w * 0.2f, h * 0.35f),
+                Offset(w * 0.12f, h * 0.5f),
+                strokeWidth = 1.2.dp.toPx(),
+            )
+            repeat(3) { sparkle ->
+                val x = w * (0.28f + sparkle * 0.19f)
+                val y = h * (0.31f + ((seed + sparkle) % 2) * 0.22f)
+                drawCircle(Color.White.copy(alpha = 0.72f), w * 0.025f, Offset(x, y))
+            }
+        } else {
+            drawCircle(
+                color = Color(0xFF173744).copy(alpha = 0.9f),
+                radius = w * 0.13f,
+                center = center,
+            )
+            val crackEnds = listOf(
+                Offset(w * 0.08f, h * 0.22f),
+                Offset(w * 0.47f, h * 0.02f),
+                Offset(w * 0.9f, h * 0.25f),
+                Offset(w * 0.92f, h * 0.67f),
+                Offset(w * 0.63f, h * 0.96f),
+                Offset(w * 0.2f, h * 0.9f),
+                Offset(w * 0.03f, h * 0.58f),
+            )
+            crackEnds.forEachIndexed { crackIndex, end ->
+                val bend = Offset(
+                    (center.x + end.x) / 2f + if ((seed + crackIndex) % 2 == 0) w * 0.06f else -w * 0.04f,
+                    (center.y + end.y) / 2f,
+                )
+                val crack = Path().apply {
+                    moveTo(center.x, center.y)
+                    lineTo(bend.x, bend.y)
+                    lineTo(end.x, end.y)
+                }
+                drawPath(
+                    crack,
+                    Color(0xFF102A35),
+                    style = Stroke(width = 3.4.dp.toPx()),
+                )
+                drawPath(
+                    crack,
+                    Color(0xFFB3E5FC).copy(alpha = 0.72f),
+                    style = Stroke(width = 1.1.dp.toPx()),
+                )
+            }
+            repeat(5) { shard ->
+                val shardX = w * (0.15f + shard * 0.17f)
+                val shardY = if (shard % 2 == 0) h * 0.18f else h * 0.79f
+                val iceShard = Path().apply {
+                    moveTo(shardX, shardY)
+                    lineTo(shardX + w * 0.09f, shardY + h * 0.03f)
+                    lineTo(shardX + w * 0.035f, shardY + h * 0.13f)
+                    close()
+                }
+                drawPath(iceShard, Color(0xFF81D4FA).copy(alpha = 0.8f))
+                drawPath(
+                    iceShard,
+                    Color.White.copy(alpha = 0.65f),
+                    style = Stroke(width = 1.dp.toPx()),
                 )
             }
         }
+    }
+}
+
+private data class MazeLayout(
+    val openings: IntArray,
+    val itemCells: Set<Int>,
+)
+
+private const val MAZE_SIZE = 50
+private const val MAZE_NORTH = 1
+private const val MAZE_EAST = 2
+private const val MAZE_SOUTH = 4
+private const val MAZE_WEST = 8
+
+private fun generateMazeLayout(seed: Long): MazeLayout {
+    val total = MAZE_SIZE * MAZE_SIZE
+    val openings = IntArray(total)
+    val visited = BooleanArray(total)
+    val stack = ArrayDeque<Int>()
+    val random = JavaRandom(seed)
+    stack.addLast(0)
+    visited[0] = true
+
+    while (stack.isNotEmpty()) {
+        val current = stack.last()
+        val x = current % MAZE_SIZE
+        val y = current / MAZE_SIZE
+        val candidates = mutableListOf<Triple<Int, Int, Int>>()
+        if (y > 0 && !visited[current - MAZE_SIZE]) {
+            candidates += Triple(current - MAZE_SIZE, MAZE_NORTH, MAZE_SOUTH)
+        }
+        if (x < MAZE_SIZE - 1 && !visited[current + 1]) {
+            candidates += Triple(current + 1, MAZE_EAST, MAZE_WEST)
+        }
+        if (y < MAZE_SIZE - 1 && !visited[current + MAZE_SIZE]) {
+            candidates += Triple(current + MAZE_SIZE, MAZE_SOUTH, MAZE_NORTH)
+        }
+        if (x > 0 && !visited[current - 1]) {
+            candidates += Triple(current - 1, MAZE_WEST, MAZE_EAST)
+        }
+
+        if (candidates.isEmpty()) {
+            stack.removeLast()
+        } else {
+            val (next, direction, opposite) = candidates[random.nextInt(candidates.size)]
+            openings[current] = openings[current] or direction
+            openings[next] = openings[next] or opposite
+            visited[next] = true
+            stack.addLast(next)
+        }
+    }
+
+    val goal = total - 1
+    val parent = IntArray(total) { -1 }
+    val queue = ArrayDeque<Int>()
+    queue.addLast(0)
+    parent[0] = 0
+    while (queue.isNotEmpty() && parent[goal] == -1) {
+        val cell = queue.removeFirst()
+        val x = cell % MAZE_SIZE
+        val y = cell / MAZE_SIZE
+        fun visit(next: Int, allowed: Boolean) {
+            if (allowed && parent[next] == -1) {
+                parent[next] = cell
+                queue.addLast(next)
+            }
+        }
+        if (y > 0) visit(cell - MAZE_SIZE, openings[cell] and MAZE_NORTH != 0)
+        if (x < MAZE_SIZE - 1) visit(cell + 1, openings[cell] and MAZE_EAST != 0)
+        if (y < MAZE_SIZE - 1) visit(cell + MAZE_SIZE, openings[cell] and MAZE_SOUTH != 0)
+        if (x > 0) visit(cell - 1, openings[cell] and MAZE_WEST != 0)
+    }
+
+    val solution = mutableListOf<Int>()
+    var cursor = goal
+    while (cursor != 0 && cursor >= 0) {
+        solution += cursor
+        cursor = parent[cursor]
+    }
+    solution += 0
+    solution.reverse()
+    val items = (1..10).mapNotNull { number ->
+        if (solution.size <= 2) null
+        else solution[(number * (solution.lastIndex.toDouble() / 11.0)).roundToLong().toInt()
+            .coerceIn(1, solution.lastIndex - 1)]
+    }.toSet()
+    return MazeLayout(openings, items)
+}
+
+@Composable
+private fun MazeGameView(
+    modifier: Modifier,
+    state: WorkState,
+    money: Long,
+    reward: Long,
+    onMove: (dx: Int, dy: Int, itemId: Int?) -> Unit,
+    onNewMaze: () -> Unit,
+    onResetMoves: (cost: Long) -> Unit,
+) {
+    if (state.mazeSeed == 0L) {
+        Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        return
+    }
+    val maze = remember(state.mazeSeed) { generateMazeLayout(state.mazeSeed) }
+    val today = LocalDate.now().toString()
+    val usedToday = if (state.mazeMoveDate == today) state.mazeMovesToday else 0
+    val bonusToday = if (state.mazeMoveDate == today) state.mazeBonusMovesToday else 0
+    val dailyLimit = 20 + bonusToday
+    val remaining = (dailyLimit - usedToday).coerceAtLeast(0)
+    val currentCell = state.mazeY * MAZE_SIZE + state.mazeX
+    val currentOpenings = maze.openings[currentCell]
+    val explorerScale = remember { Animatable(1f) }
+    var explorerFacing by remember(state.mazeSeed) { mutableIntStateOf(1) }
+    var explorerShowingBack by remember(state.mazeSeed) { mutableStateOf(false) }
+
+    LaunchedEffect(state.mazeX, state.mazeY) {
+        explorerScale.snapTo(0.78f)
+        explorerScale.animateTo(1f, tween(220))
+    }
+
+    fun move(dx: Int, dy: Int) {
+        val targetX = state.mazeX + dx
+        val targetY = state.mazeY + dy
+        if (targetX !in 0 until MAZE_SIZE || targetY !in 0 until MAZE_SIZE) return
+        val targetCell = targetY * MAZE_SIZE + targetX
+        val itemId = targetCell.takeIf {
+            it in maze.itemCells && it !in state.mazeCollectedItems
+        }
+        if (dx < 0) explorerFacing = -1
+        if (dx > 0) explorerFacing = 1
+        if (dx != 0) explorerShowingBack = false
+        if (dy < 0) explorerShowingBack = true
+        if (dy > 0) explorerShowingBack = false
+        onMove(dx, dy, itemId)
+    }
+
+    Column(
+        modifier.verticalScroll(rememberScrollState()).padding(horizontal = 3.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp),
+            border = BorderStroke(2.dp, Color(0xFF00897B)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFE0F2F1).copy(alpha = 0.96f)),
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("🧭 무릉도원 미로", color = Color(0xFF00695C),
+                    style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                Text(
+                    "50×50 미로 · 캐릭터 중심 3×3 시야",
+                    color = Color(0xFF456A64),
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    Text("👣 $remaining / $dailyLimit", fontWeight = FontWeight.ExtraBold)
+                    Text("🔷 ${state.mazeCollectedItems.size} / 10",
+                        color = Color(0xFF0277BD), fontWeight = FontWeight.ExtraBold)
+                    Text("🎁 ${compactWon(reward.toDouble())}",
+                        color = Color(0xFF2E7D32), fontWeight = FontWeight.ExtraBold)
+                }
+                Text(
+                    "수정 1개를 먹으면 오늘 바로 1칸 더 이동할 수 있어요.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF546E7A),
+                )
+                Spacer(Modifier.height(10.dp))
+
+                Column(
+                    Modifier.fillMaxWidth().aspectRatio(1f)
+                        .clip(RoundedCornerShape(18.dp))
+                        .border(3.dp, Color(0xFF5D4037), RoundedCornerShape(18.dp)),
+                ) {
+                    repeat(3) { visibleRow ->
+                        Row(Modifier.weight(1f).fillMaxWidth()) {
+                            repeat(3) { visibleColumn ->
+                                val mapX = state.mazeX + visibleColumn - 1
+                                val mapY = state.mazeY + visibleRow - 1
+                                val inMap = mapX in 0 until MAZE_SIZE && mapY in 0 until MAZE_SIZE
+                                val cellIndex = if (inMap) mapY * MAZE_SIZE + mapX else -1
+                                val openings = if (inMap) maze.openings[cellIndex] else 0
+                                val isPlayer = visibleRow == 1 && visibleColumn == 1
+                                val isGoal = cellIndex == MAZE_SIZE * MAZE_SIZE - 1
+                                val hasItem = cellIndex in maze.itemCells &&
+                                    cellIndex !in state.mazeCollectedItems
+
+                                Box(
+                                    Modifier.weight(1f).fillMaxHeight()
+                                        .background(if (inMap) Color(0xFFD7CCC8) else Color(0xFF17252B)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (inMap) {
+                                        Image(
+                                            painter = painterResource(R.drawable.maze_floor),
+                                            contentDescription = null,
+                                            modifier = Modifier.matchParentSize(),
+                                            contentScale = ContentScale.Crop,
+                                            alpha = if (isPlayer) 1f else 0.78f,
+                                        )
+                                        Canvas(Modifier.matchParentSize()) {
+                                            val wallColor = Color(0xFF101317)
+                                            val wallLight = Color(0xFF42484F)
+                                            val wallWidth = 11.dp.toPx()
+                                            fun wall(start: Offset, end: Offset) {
+                                                drawLine(wallColor, start, end, wallWidth)
+                                                drawLine(
+                                                    wallLight.copy(alpha = 0.82f),
+                                                    start,
+                                                    end,
+                                                    3.dp.toPx(),
+                                                )
+                                            }
+                                            if (openings and MAZE_NORTH == 0) {
+                                                wall(Offset.Zero, Offset(size.width, 0f))
+                                            }
+                                            if (openings and MAZE_EAST == 0) {
+                                                wall(Offset(size.width, 0f), Offset(size.width, size.height))
+                                            }
+                                            if (openings and MAZE_SOUTH == 0) {
+                                                wall(Offset(0f, size.height), Offset(size.width, size.height))
+                                            }
+                                            if (openings and MAZE_WEST == 0) {
+                                                wall(Offset.Zero, Offset(0f, size.height))
+                                            }
+                                        }
+                                        if (isGoal) {
+                                            Text("🏛️", style = MaterialTheme.typography.headlineLarge)
+                                        }
+                                        if (hasItem) {
+                                            Text("🔷", style = MaterialTheme.typography.headlineMedium)
+                                        }
+                                        if (isPlayer) {
+                                            Image(
+                                                painter = painterResource(
+                                                    if (explorerShowingBack) {
+                                                        R.drawable.maze_explorer_back
+                                                    } else {
+                                                        R.drawable.maze_explorer
+                                                    },
+                                                ),
+                                                contentDescription = "미로 탐험 캐릭터",
+                                                modifier = Modifier.fillMaxSize().padding(5.dp)
+                                                    .scale(explorerScale.value)
+                                                    .graphicsLayer {
+                                                        scaleX = explorerFacing.toFloat()
+                                                    },
+                                                contentScale = ContentScale.Fit,
+                                            )
+                                        }
+                                        if (!isPlayer) {
+                                            Box(
+                                                Modifier.matchParentSize().background(
+                                                    Color(0xFF37474F).copy(alpha = 0.20f),
+                                                ),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+
+                val canMove = remaining > 0 && !state.mazeCompleted
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    MazeDirectionButton(
+                        icon = "▲",
+                        enabled = canMove && currentOpenings and MAZE_NORTH != 0,
+                    ) { move(0, -1) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        MazeDirectionButton(
+                            icon = "◀",
+                            enabled = canMove && currentOpenings and MAZE_WEST != 0,
+                        ) { move(-1, 0) }
+                        Surface(
+                            modifier = Modifier.size(58.dp),
+                            color = Color(0xFFFFE0B2),
+                            shape = RoundedCornerShape(13.dp),
+                            border = BorderStroke(2.dp, Color(0xFF8D6E63)),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text("🧭", style = MaterialTheme.typography.headlineMedium)
+                            }
+                        }
+                        MazeDirectionButton(
+                            icon = "▶",
+                            enabled = canMove && currentOpenings and MAZE_EAST != 0,
+                        ) { move(1, 0) }
+                    }
+                    MazeDirectionButton(
+                        icon = "▼",
+                        enabled = canMove && currentOpenings and MAZE_SOUTH != 0,
+                    ) { move(0, 1) }
+                }
+
+                when {
+                    state.mazeCompleted -> {
+                        Text("미로를 완주했습니다!", color = Color(0xFF2E7D32),
+                            fontWeight = FontWeight.ExtraBold)
+                        Button(onClick = onNewMaze, modifier = Modifier.fillMaxWidth()) {
+                            Text("새로운 50×50 미로 시작")
+                        }
+                    }
+                    remaining == 0 -> Text(
+                        "오늘 이동 가능한 칸을 모두 사용했습니다. 내일 이어서 탐험하세요.",
+                        color = Color(0xFFC62828),
+                        textAlign = TextAlign.Center,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                if (!state.mazeCompleted) {
+                    val resetCost = (reward / 10L).coerceAtLeast(1L)
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = { onResetMoves(resetCost) },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = usedToday > 0 && money >= resetCost,
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(2.dp, Color(0xFF00796B)),
+                    ) {
+                        Text(
+                            "${resetCost.won()} 내고 이동 횟수 초기화",
+                            fontWeight = FontWeight.ExtraBold,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MazeDirectionButton(icon: String, enabled: Boolean, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(58.dp),
+        shape = RoundedCornerShape(13.dp),
+        contentPadding = PaddingValues(0.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00796B)),
+    ) {
+        Text(icon, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
     }
 }
 
@@ -932,6 +1752,9 @@ private fun betAmountLabel(amount: Long): String =
     } else {
         compactWon(amount.toDouble())
     }
+
+private fun seotdaBetLabel(amount: Long, currency: SeotdaBetCurrency): String =
+    if (currency == SeotdaBetCurrency.BlueChip) "💎 ${amount.formattedNumber()}개" else amount.won()
 
 private fun formatRemaining(millis: Long): String {
     val seconds = (millis.coerceAtLeast(0) + 999) / 1_000
@@ -990,7 +1813,7 @@ private fun SettlementView(viewModel: MainViewModel) {
     }
 
     settlementQuest?.let { quest ->
-        val chapterReward = Math.multiplyExact(quest.reward, rewardMultiplier)
+        val chapterReward = scaledChapterReward(quest.reward, user?.chapter ?: 1)
         val settlementReward = if (moreRewardApplied) chapterReward + chapterReward / 2 else chapterReward
         Dialog(onDismissRequest = { settlementQuest = null }) {
             Card(
@@ -1017,7 +1840,7 @@ private fun SettlementView(viewModel: MainViewModel) {
                         Text(
                             "${if (quest.period == QuestPeriod.Daily) "일일" else "주간"} 퀘스트 " +
                                 "${quest.target.formattedNumber()}걸음을 달성했습니다.\n" +
-                                "${settlementReward.won()}을 정산받을까요?" +
+                                "${compactWon(settlementReward.toDouble())}을 정산받을까요?" +
                                     if (moreRewardApplied) "\n더 받기 보너스 50%가 적용되었습니다." else "",
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Bold,
@@ -1094,7 +1917,7 @@ private fun StepQuestCard(
     quest: StepQuest,
     steps: Long,
     state: StepQuestState,
-    rewardMultiplier: Long,
+    rewardMultiplier: Double,
     onClaim: () -> Unit,
 ) {
     val today = LocalDate.now()
@@ -1129,8 +1952,8 @@ private fun StepQuestCard(
                     )
                     Spacer(Modifier.weight(1f))
                     Text(
-                        "${Math.multiplyExact(quest.reward, rewardMultiplier).won()} · " +
-                            "×${rewardMultiplier.formattedNumber()}",
+                        "${compactWon((quest.reward.toDouble() * rewardMultiplier))} · " +
+                            "×${rewardMultiplierLabel(rewardMultiplier)}",
                         color = Color(0xFFFF8F00),
                         fontWeight = FontWeight.ExtraBold,
                     )
@@ -1339,9 +2162,9 @@ private fun InventorySlot(index: Int) {
 @Composable
 private fun GambleView(viewModel: MainViewModel) {
     val context = LocalContext.current
-    val pagerState = rememberPagerState(pageCount = { 3 })
+    val pagerState = rememberPagerState(pageCount = { 4 })
     val scope = rememberCoroutineScope()
-    val gameLabels = listOf("가위바위보", "1대1 섯다", "3장 섯다")
+    val gameLabels = listOf("가위바위보", "1대1 섯다", "3장 섯다", "상점")
     var gambleTts by remember { mutableStateOf<TextToSpeech?>(null) }
     var gambleTtsReady by remember { mutableStateOf(false) }
 
@@ -1401,7 +2224,95 @@ private fun GambleView(viewModel: MainViewModel) {
                 when (page) {
                     0 -> RpsGambleView(viewModel, speakResult)
                     1 -> SeotdaView(viewModel, speakResult)
-                    else -> ThreeCardSeotdaView(viewModel, speakResult)
+                    2 -> ThreeCardSeotdaView(viewModel, speakResult)
+                    else -> GambleShopView(viewModel)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GambleShopView(viewModel: MainViewModel) {
+    val context = LocalContext.current
+    val user by viewModel.user.collectAsState()
+    val money = user?.money ?: 0L
+    val blueChips = user?.blueChips ?: 0L
+    val premiumOwned = user?.premiumIdColor == true
+    val exchangeCost = es.kim.story.data.UserRepository.BLUE_CHIP_EXCHANGE_COST
+    val shopSoundPool = remember { SoundPool.Builder().setMaxStreams(2).build() }
+    val exchangeSound = remember(shopSoundPool) {
+        shopSoundPool.load(context, R.raw.sfx_blue_chip_exchange, 1)
+    }
+    DisposableEffect(shopSoundPool) {
+        onDispose { shopSoundPool.release() }
+    }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp),
+            border = BorderStroke(2.dp, Color(0xFF42A5F5)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF102A43)),
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("💎 도박 상점", color = Color(0xFF80D8FF),
+                    style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.height(8.dp))
+                Text("보유 재화 ${money.won()}", color = Color.White)
+                Text("보유 블루칩 ${blueChips.formattedNumber()}개",
+                    color = Color(0xFF82B1FF), fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.height(18.dp))
+
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Color.White.copy(alpha = 0.1f),
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("💠 블루칩 교환", color = Color.White, fontWeight = FontWeight.ExtraBold)
+                        Text("1000조원으로 블루칩 1개를 교환합니다.",
+                            color = Color.White.copy(alpha = 0.75f))
+                        Spacer(Modifier.height(10.dp))
+                        Button(
+                            onClick = {
+                                viewModel.exchangeBlueChip {
+                                    shopSoundPool.play(exchangeSound, 1f, 1f, 1, 0, 1f)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = money >= exchangeCost,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2)),
+                        ) { Text("1000조원 → 블루칩 1개") }
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Color.White.copy(alpha = 0.1f),
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("✨ 프리미엄 아이디 · 도박의 신", color = Color(0xFFFFD54F),
+                            fontWeight = FontWeight.ExtraBold)
+                        Text("아이디를 프리미엄 골드 색상으로 바꾸고 전용 '도박의 신' 배지를 영구 적용합니다.",
+                            color = Color.White.copy(alpha = 0.75f))
+                        Spacer(Modifier.height(10.dp))
+                        Button(
+                            onClick = viewModel::buyPremiumIdColor,
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !premiumOwned && blueChips >= 100L,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF9A825)),
+                        ) {
+                            Text(if (premiumOwned) "구매 완료" else "블루칩 100개로 구매")
+                        }
+                    }
                 }
             }
         }
@@ -1415,8 +2326,7 @@ private fun RpsGambleView(viewModel: MainViewModel, speakResult: (String) -> Uni
     val wagerOptions = GambleManager.baseWagersForChapter(user?.chapter ?: 1)
     var wager by remember { mutableLongStateOf(wagerOptions[1]) }
     val money = user?.money ?: 0L
-    val canPlay = state.playedToday < 10 &&
-        wager in 1..money &&
+    val canPlay = wager in 1..money &&
         wager <= Long.MAX_VALUE / 2 &&
         (state.replayWager == 0L || wager == state.replayWager)
     LaunchedEffect(state.replayWager) {
@@ -1450,22 +2360,11 @@ private fun RpsGambleView(viewModel: MainViewModel, speakResult: (String) -> Uni
                     style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "진행 횟수 ${state.playedToday} / 10",
+                    "일일 제한 없이 무제한 플레이",
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
-                Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    repeat(10) { index ->
-                        Box(
-                            Modifier.size(18.dp).background(
-                                if (index < state.playedToday) Color(0xFFFFB300) else Color(0xFF5C5475),
-                                RoundedCornerShape(50),
-                            ),
-                        )
-                    }
-                }
                 Spacer(Modifier.height(20.dp))
                 Text("보유 재화 ${money.won()}", color = Color(0xFFB9F6CA), fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(10.dp))
@@ -1476,7 +2375,7 @@ private fun RpsGambleView(viewModel: MainViewModel, speakResult: (String) -> Uni
                             selected = wager == amount,
                             onClick = { wager = amount },
                             modifier = Modifier.weight(1f),
-                            enabled = state.playedToday < 10 && state.replayWager == 0L,
+                            enabled = state.replayWager == 0L,
                             label = {
                                 Text(
                                     betAmountLabel(amount),
@@ -1507,7 +2406,7 @@ private fun RpsGambleView(viewModel: MainViewModel, speakResult: (String) -> Uni
                 }
                 Spacer(Modifier.height(22.dp))
                 Text(
-                    if (state.playedToday < 10) "패를 선택하세요" else "오늘의 10번을 모두 사용했습니다.",
+                    "패를 선택하세요",
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
                 )
@@ -1537,16 +2436,6 @@ private fun RpsGambleView(viewModel: MainViewModel, speakResult: (String) -> Uni
                 )
             }
         }
-        Spacer(Modifier.height(14.dp))
-        Button(
-            onClick = viewModel::resetRpsCount,
-            modifier = Modifier.fillMaxWidth(),
-            enabled = state.playedToday > 0 &&
-                state.result == null &&
-                state.replayWager == 0L &&
-                money >= GambleManager.GAMBLE_COUNT_RESET_COST,
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF455A64)),
-        ) { Text("100만원 내고 가위바위보 횟수 초기화") }
     }
 
     state.result?.let { result ->
@@ -1618,12 +2507,16 @@ private fun SeotdaView(viewModel: MainViewModel, speakResult: (String) -> Unit) 
     } ?: GambleManager.DEFAULT_SEOTDA_OPPONENT_NAMES
     val state by viewModel.seotdaState.collectAsState()
     val money = user?.money ?: 0L
+    val blueChips = user?.blueChips ?: 0L
     val nextBet = state.wager
     val wagerOptions = GambleManager.baseWagersForChapter(user?.chapter ?: 1)
     var selectedBaseWager by remember { mutableLongStateOf(wagerOptions[1]) }
+    var selectedBetCurrency by remember { mutableStateOf(SeotdaBetCurrency.Money) }
     var selectedPlayerCount by remember { mutableIntStateOf(2) }
     LaunchedEffect(wagerOptions) {
-        if (!state.isPlaying && state.result == null && selectedBaseWager !in wagerOptions) {
+        if (selectedBetCurrency == SeotdaBetCurrency.Money &&
+            !state.isPlaying && state.result == null && selectedBaseWager !in wagerOptions
+        ) {
             selectedBaseWager = wagerOptions[1]
         }
     }
@@ -1652,7 +2545,7 @@ private fun SeotdaView(viewModel: MainViewModel, speakResult: (String) -> Unit) 
             ) {
                 Text("🎴 1대1 섯다", color = Color(0xFFFFD54F),
                     style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
-                Text("오늘 ${state.playedToday} / 10판 · 보유 재화 ${money.won()}",
+                Text("무제한 플레이 · ${money.won()} · 💎 ${blueChips.formattedNumber()}개",
                     color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.bodyMedium)
                 state.replayReason?.let {
                     Text(it, color = Color(0xFFFFD54F), fontWeight = FontWeight.ExtraBold,
@@ -1667,8 +2560,12 @@ private fun SeotdaView(viewModel: MainViewModel, speakResult: (String) -> Unit) 
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                         wagerOptions.forEach { wager ->
                             FilterChip(
-                                selected = selectedBaseWager == wager,
-                                onClick = { selectedBaseWager = wager },
+                                selected = selectedBetCurrency == SeotdaBetCurrency.Money &&
+                                    selectedBaseWager == wager,
+                                onClick = {
+                                    selectedBetCurrency = SeotdaBetCurrency.Money
+                                    selectedBaseWager = wager
+                                },
                                 modifier = Modifier.weight(1f),
                                 label = {
                                     Text(
@@ -1686,6 +2583,22 @@ private fun SeotdaView(viewModel: MainViewModel, speakResult: (String) -> Unit) 
                             )
                         }
                     }
+                    FilterChip(
+                        selected = selectedBetCurrency == SeotdaBetCurrency.BlueChip,
+                        onClick = {
+                            selectedBetCurrency = SeotdaBetCurrency.BlueChip
+                            selectedBaseWager = GambleManager.BLUE_CHIP_BASE_WAGER
+                        },
+                        label = {
+                            Text("💎 블루칩 1개", Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFF42A5F5),
+                            selectedLabelColor = Color.White,
+                            containerColor = Color.White,
+                            labelColor = Color(0xFF1565C0),
+                        ),
+                    )
                     Spacer(Modifier.height(8.dp))
                     PlayerCountSelector(selectedPlayerCount) { selectedPlayerCount = it }
                     Spacer(Modifier.height(8.dp))
@@ -1693,12 +2606,24 @@ private fun SeotdaView(viewModel: MainViewModel, speakResult: (String) -> Unit) 
                         color = Color.White.copy(alpha = 0.7f), textAlign = TextAlign.Center)
                     Spacer(Modifier.height(18.dp))
                     Button(
-                        onClick = { viewModel.startSeotda(selectedBaseWager, selectedPlayerCount) },
-                        enabled = state.playedToday < 10 && money >= selectedBaseWager,
+                        onClick = {
+                            viewModel.startSeotda(
+                                selectedBaseWager, selectedPlayerCount, selectedBetCurrency,
+                            )
+                        },
+                        enabled =
+                            if (selectedBetCurrency == SeotdaBetCurrency.Money) {
+                                money >= selectedBaseWager
+                            } else {
+                                blueChips >= selectedBaseWager
+                            },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
-                    ) { Text("${selectedBaseWager.won()} 걸고 시작") }
-                    if (money < selectedBaseWager) {
-                        Text("선택한 판돈보다 보유 재화가 부족합니다.", color = Color(0xFFFF8A80))
+                    ) { Text("${seotdaBetLabel(selectedBaseWager, selectedBetCurrency)} 걸고 시작") }
+                    if (
+                        (selectedBetCurrency == SeotdaBetCurrency.Money && money < selectedBaseWager) ||
+                        (selectedBetCurrency == SeotdaBetCurrency.BlueChip && blueChips < selectedBaseWager)
+                    ) {
+                        Text("선택한 판돈이 부족합니다.", color = Color(0xFFFF8A80))
                     }
                 } else {
                     state.computerHands.forEachIndexed { opponentIndex, hand ->
@@ -1719,7 +2644,8 @@ private fun SeotdaView(viewModel: MainViewModel, speakResult: (String) -> Unit) 
                     Surface(color = Color(0xFF0D281B), shape = RoundedCornerShape(12.dp)) {
                         Column(Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
                             horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("내 판돈 ${state.wager.won()}", color = Color(0xFFFFD54F),
+                            Text("내 판돈 ${seotdaBetLabel(state.wager, state.betCurrency)}",
+                                color = Color(0xFFFFD54F),
                                 fontWeight = FontWeight.ExtraBold)
                             Text("추가 배팅 ${state.raises} / 3", color = Color.White.copy(alpha = 0.75f))
                         }
@@ -1745,12 +2671,20 @@ private fun SeotdaView(viewModel: MainViewModel, speakResult: (String) -> Unit) 
                             Button(
                                 onClick = viewModel::raiseSeotda,
                                 modifier = Modifier.weight(1f),
-                                enabled = state.raises < 3 && money >= nextBet,
+                                enabled = state.raises < 3 &&
+                                    if (state.betCurrency == SeotdaBetCurrency.Money) {
+                                        money >= nextBet
+                                    } else {
+                                        blueChips >= nextBet
+                                    },
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
-                            ) { Text("${nextBet.won()} 더 걸기") }
+                            ) { Text("${seotdaBetLabel(nextBet, state.betCurrency)} 더 걸기") }
                         }
-                        if (state.raises < 3 && money < nextBet) {
-                            Text("추가 배팅에 필요한 재화가 부족합니다.", color = Color(0xFFFF8A80))
+                        if (state.raises < 3 &&
+                            ((state.betCurrency == SeotdaBetCurrency.Money && money < nextBet) ||
+                                (state.betCurrency == SeotdaBetCurrency.BlueChip && blueChips < nextBet))
+                        ) {
+                            Text("추가 배팅에 필요한 판돈이 부족합니다.", color = Color(0xFFFF8A80))
                         }
                     }
                 }
@@ -1758,16 +2692,6 @@ private fun SeotdaView(viewModel: MainViewModel, speakResult: (String) -> Unit) 
         }
         Spacer(Modifier.height(14.dp))
         SeotdaRankGuide()
-        Spacer(Modifier.height(14.dp))
-        Button(
-            onClick = viewModel::resetSeotdaCount,
-            modifier = Modifier.fillMaxWidth(),
-            enabled = state.playedToday > 0 &&
-                !state.isPlaying &&
-                state.result == null &&
-                money >= GambleManager.GAMBLE_COUNT_RESET_COST,
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF455A64)),
-        ) { Text("100만원 내고 섯다 횟수 초기화") }
     }
 
     state.replayReason?.let { reason ->
@@ -1857,10 +2781,11 @@ private fun SeotdaView(viewModel: MainViewModel, speakResult: (String) -> Unit) 
                     Spacer(Modifier.height(8.dp))
                     Text(
                         when (result.outcome) {
-                            SeotdaOutcome.Win -> "+${(result.wager * (state.playerCount - 1)).won()}" +
+                            SeotdaOutcome.Win ->
+                                "+${seotdaBetLabel(result.wager * (state.playerCount - 1), result.betCurrency)}" +
                                 if (result.premium > 0) "\n족보 보너스 +${result.premium.won()}" else ""
                             SeotdaOutcome.Draw -> "판돈 반환"
-                            SeotdaOutcome.Lose -> "-${result.wager.won()}"
+                            SeotdaOutcome.Lose -> "-${seotdaBetLabel(result.wager, result.betCurrency)}"
                         },
                         color = color, style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
@@ -1882,11 +2807,15 @@ private fun ThreeCardSeotdaView(viewModel: MainViewModel, speakResult: (String) 
     } ?: GambleManager.DEFAULT_SEOTDA_OPPONENT_NAMES
     val state by viewModel.threeCardSeotdaState.collectAsState()
     val money = user?.money ?: 0L
+    val blueChips = user?.blueChips ?: 0L
     val wagerOptions = GambleManager.baseWagersForChapter(user?.chapter ?: 1)
     var selectedBaseWager by remember { mutableLongStateOf(wagerOptions[1]) }
+    var selectedBetCurrency by remember { mutableStateOf(SeotdaBetCurrency.Money) }
     var selectedPlayerCount by remember { mutableIntStateOf(2) }
     LaunchedEffect(wagerOptions) {
-        if (!state.isPlaying && state.result == null && selectedBaseWager !in wagerOptions) {
+        if (selectedBetCurrency == SeotdaBetCurrency.Money &&
+            !state.isPlaying && state.result == null && selectedBaseWager !in wagerOptions
+        ) {
             selectedBaseWager = wagerOptions[1]
         }
     }
@@ -1912,7 +2841,7 @@ private fun ThreeCardSeotdaView(viewModel: MainViewModel, speakResult: (String) 
             Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("🎴 3장 섯다", color = Color(0xFFFFD54F),
                     style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
-                Text("오늘 ${state.playedToday} / 10판 · 보유 재화 ${money.won()}",
+                Text("무제한 플레이 · ${money.won()} · 💎 ${blueChips.formattedNumber()}개",
                     color = Color.White.copy(alpha = 0.85f))
                 state.replayReason?.let {
                     Text(it, color = Color(0xFFFFD54F), fontWeight = FontWeight.ExtraBold,
@@ -1926,8 +2855,12 @@ private fun ThreeCardSeotdaView(viewModel: MainViewModel, speakResult: (String) 
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         wagerOptions.forEach { wager ->
                             FilterChip(
-                                selected = selectedBaseWager == wager,
-                                onClick = { selectedBaseWager = wager },
+                                selected = selectedBetCurrency == SeotdaBetCurrency.Money &&
+                                    selectedBaseWager == wager,
+                                onClick = {
+                                    selectedBetCurrency = SeotdaBetCurrency.Money
+                                    selectedBaseWager = wager
+                                },
                                 modifier = Modifier.weight(1f),
                                 label = {
                                     Text(
@@ -1945,6 +2878,22 @@ private fun ThreeCardSeotdaView(viewModel: MainViewModel, speakResult: (String) 
                             )
                         }
                     }
+                    FilterChip(
+                        selected = selectedBetCurrency == SeotdaBetCurrency.BlueChip,
+                        onClick = {
+                            selectedBetCurrency = SeotdaBetCurrency.BlueChip
+                            selectedBaseWager = GambleManager.BLUE_CHIP_BASE_WAGER
+                        },
+                        label = {
+                            Text("💎 블루칩 1개", Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFF42A5F5),
+                            selectedLabelColor = Color.White,
+                            containerColor = Color.White,
+                            labelColor = Color(0xFF1565C0),
+                        ),
+                    )
                     PlayerCountSelector(selectedPlayerCount) { selectedPlayerCount = it }
                     Spacer(Modifier.height(6.dp))
                     Text("3장 중 가장 높은 2장 조합으로 승부합니다.",
@@ -1952,13 +2901,23 @@ private fun ThreeCardSeotdaView(viewModel: MainViewModel, speakResult: (String) 
                     Spacer(Modifier.height(14.dp))
                     Button(
                         onClick = {
-                            viewModel.startThreeCardSeotda(selectedBaseWager, selectedPlayerCount)
+                            viewModel.startThreeCardSeotda(
+                                selectedBaseWager, selectedPlayerCount, selectedBetCurrency,
+                            )
                         },
-                        enabled = state.playedToday < 10 && money >= selectedBaseWager,
+                        enabled =
+                            if (selectedBetCurrency == SeotdaBetCurrency.Money) {
+                                money >= selectedBaseWager
+                            } else {
+                                blueChips >= selectedBaseWager
+                            },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
-                    ) { Text("${selectedBaseWager.won()} 걸고 시작") }
-                    if (money < selectedBaseWager) {
-                        Text("선택한 판돈보다 보유 재화가 부족합니다.", color = Color(0xFFFF8A80))
+                    ) { Text("${seotdaBetLabel(selectedBaseWager, selectedBetCurrency)} 걸고 시작") }
+                    if (
+                        (selectedBetCurrency == SeotdaBetCurrency.Money && money < selectedBaseWager) ||
+                        (selectedBetCurrency == SeotdaBetCurrency.BlueChip && blueChips < selectedBaseWager)
+                    ) {
+                        Text("선택한 판돈이 부족합니다.", color = Color(0xFFFF8A80))
                     }
                 } else {
                     state.computerHands.forEachIndexed { opponentIndex, hand ->
@@ -1979,7 +2938,8 @@ private fun ThreeCardSeotdaView(viewModel: MainViewModel, speakResult: (String) 
                     Surface(color = Color(0xFF0D281B), shape = RoundedCornerShape(12.dp)) {
                         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                             horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("내 판돈 ${state.wager.won()}", color = Color(0xFFFFD54F),
+                            Text("내 판돈 ${seotdaBetLabel(state.wager, state.betCurrency)}",
+                                color = Color(0xFFFFD54F),
                                 fontWeight = FontWeight.ExtraBold)
                             Text("추가 배팅 ${state.raises} / 3", color = Color.White.copy(alpha = 0.75f))
                         }
@@ -2027,10 +2987,15 @@ private fun ThreeCardSeotdaView(viewModel: MainViewModel, speakResult: (String) 
                             Button(
                                 onClick = viewModel::raiseThreeCardSeotda,
                                 modifier = Modifier.weight(1f),
-                                enabled = state.raises < 3 && money >= state.wager &&
+                                enabled = state.raises < 3 &&
+                                    (if (state.betCurrency == SeotdaBetCurrency.Money) {
+                                        money >= state.wager
+                                    } else {
+                                        blueChips >= state.wager
+                                    }) &&
                                     (state.raises < 2 || state.selectedCardIndices.size == 2),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
-                            ) { Text("${state.wager.won()} 더 걸기") }
+                            ) { Text("${seotdaBetLabel(state.wager, state.betCurrency)} 더 걸기") }
                         }
                     }
                 }
@@ -2038,14 +3003,6 @@ private fun ThreeCardSeotdaView(viewModel: MainViewModel, speakResult: (String) 
         }
         Spacer(Modifier.height(12.dp))
         SeotdaRankGuide()
-        Spacer(Modifier.height(12.dp))
-        Button(
-            onClick = viewModel::resetThreeCardSeotdaCount,
-            modifier = Modifier.fillMaxWidth(),
-            enabled = state.playedToday > 0 && !state.isPlaying &&
-                state.result == null && money >= GambleManager.GAMBLE_COUNT_RESET_COST,
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF455A64)),
-        ) { Text("100만원 내고 3장 섯다 횟수 초기화") }
     }
 
     state.replayReason?.let { reason ->
@@ -2133,10 +3090,11 @@ private fun ThreeCardSeotdaView(viewModel: MainViewModel, speakResult: (String) 
                     Spacer(Modifier.height(8.dp))
                     Text(
                         when (result.outcome) {
-                            SeotdaOutcome.Win -> "+${(result.wager * (state.playerCount - 1)).won()}" +
+                            SeotdaOutcome.Win ->
+                                "+${seotdaBetLabel(result.wager * (state.playerCount - 1), result.betCurrency)}" +
                                 if (result.premium > 0) "\n족보 보너스 +${result.premium.won()}" else ""
                             SeotdaOutcome.Draw -> "판돈 반환"
-                            SeotdaOutcome.Lose -> "-${result.wager.won()}"
+                            SeotdaOutcome.Lose -> "-${seotdaBetLabel(result.wager, result.betCurrency)}"
                         },
                         color = color, style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
@@ -2349,7 +3307,9 @@ private fun SeotdaRankGuide() {
                 "38광땡 > 18광땡 > 13광땡 > 장땡 > 9땡 … 1땡\n" +
                     "> 알리 > 독사 > 구삥 > 장삥 > 장사 > 세륙\n" +
                     "> 갑오(9끗) > 8끗 … 1끗 > 망통(0끗)\n" +
-                    "땡잡이(3월+7월): 1땡~9땡만 잡으며 장땡·광땡은 잡지 못합니다.\n" +
+                    "땡잡이(3월+7월): 1땡~9땡을 잡으며 장땡·광땡은 잡지 못합니다.\n" +
+                    "암행어사(4월+7월): 13·18광땡을 잡지만 38광땡은 잡지 못합니다.\n" +
+                    "구사: 알리 이하 · 멍텅구리 구사: 장땡 이하일 때 재경기합니다.\n" +
                     "땡 승리: 숫자 × 100만원 · 광땡 승리: 2천만원 · 38광땡: 1억원 보너스\n" +
                     "구사(9월+4월) 또는 같은 족보 무승부는 판수 차감 없이 재경기합니다.",
                 style = MaterialTheme.typography.bodySmall,
@@ -2422,13 +3382,13 @@ private fun StoryView(viewModel: MainViewModel) {
             ) {
                 Column(Modifier.padding(20.dp)) {
                     if (completed) {
-                        Text("STORY 3 COMPLETE", color = MaterialTheme.colorScheme.primary,
+                        Text("STORY 5 COMPLETE", color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.ExtraBold)
                         Spacer(Modifier.height(8.dp))
-                        Text("우리들의 무릉도원", style = MaterialTheme.typography.headlineSmall,
+                        Text("우리가 이기는 방식", style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.ExtraBold)
                         Spacer(Modifier.height(12.dp))
-                        Text("세 개의 스토리와 30개의 챕터를 모두 완료했습니다.\n멸망을 지나온 무릉도원의 이야기는 아직 끝나지 않았습니다.")
+                        Text("다섯 개의 스토리와 50개의 챕터를 모두 완료했습니다.\n한 번 패배했던 친구들은 결국 함께 이기는 방법을 찾아냈습니다.")
                     } else if (chapter != null) {
                         Text(
                             "STORY $season · CHAPTER $episode / 10",
@@ -2512,7 +3472,7 @@ private fun StoryView(viewModel: MainViewModel) {
                 Text(
                     "${chapter.clearCost.won()}을 사용해 이 챕터를 클리어할까요?\n" +
                         if (chapter.number < storyChapters.size) "다음 이야기가 바로 열립니다."
-                        else "무릉도원의 세 번째 이야기가 완결됩니다.",
+                        else "플레이어와 무릉도원 친구들의 반격 이야기가 완결됩니다.",
                 )
             },
             confirmButton = {
@@ -2536,6 +3496,8 @@ private fun SettingsView(
     bgmVolume: Float,
     onBgmEnabledChange: (Boolean) -> Unit,
     onBgmVolumeChange: (Float) -> Unit,
+    openDbEditor: Boolean,
+    onDbEditorClosed: () -> Unit,
     onLogout: () -> Unit,
     onSwitchAccount: (String) -> Unit,
 ) {
@@ -2552,6 +3514,9 @@ private fun SettingsView(
     var seotdaName3 by remember { mutableStateOf("") }
     var dbColumn by remember { mutableStateOf("") }
     var dbValue by remember { mutableStateOf("") }
+    LaunchedEffect(openDbEditor) {
+        if (openDbEditor) showDbEditor = true
+    }
     Box(Modifier.fillMaxSize()) {
         Image(
             painter = painterResource(R.drawable.settings_background),
@@ -2566,8 +3531,7 @@ private fun SettingsView(
             Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp)) {
                 Text(
                     "현재 계정",
-                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { showDbEditor = true }
-                        .padding(vertical = 3.dp),
+                    modifier = Modifier.padding(vertical = 3.dp),
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold,
                 )
@@ -2876,7 +3840,10 @@ private fun SettingsView(
             else -> false
         }
         AlertDialog(
-            onDismissRequest = { showDbEditor = false },
+            onDismissRequest = {
+                showDbEditor = false
+                onDbEditorClosed()
+            },
             containerColor = Color.White,
             title = { Text("Room DB 수정") },
             text = {
@@ -2963,12 +3930,16 @@ private fun SettingsView(
                         dbColumn = ""
                         dbValue = ""
                         showDbEditor = false
+                        onDbEditorClosed()
                     },
                     enabled = validValue,
                 ) { Text("변경") }
             },
             dismissButton = {
-                TextButton(onClick = { showDbEditor = false }) { Text("취소") }
+                TextButton(onClick = {
+                    showDbEditor = false
+                    onDbEditorClosed()
+                }) { Text("취소") }
             },
         )
     }

@@ -31,13 +31,16 @@ data class GambleState(
 )
 
 data class SeotdaCard(val month: Int, val variant: Int, val bright: Boolean = false)
+enum class SeotdaBetCurrency { Money, BlueChip }
 
 data class SeotdaHandRank(
     val strength: Int,
     val name: String,
     val ddaengNumber: Int = 0,
     val isDdaengCatcher: Boolean = false,
+    val isBrightCatcher: Boolean = false,
     val isNineFour: Boolean = false,
+    val isMungtunguriNineFour: Boolean = false,
 )
 
 enum class SeotdaOutcome { Win, Draw, Lose }
@@ -47,6 +50,7 @@ data class SeotdaResult(
     val playerRank: SeotdaHandRank,
     val computerRank: SeotdaHandRank,
     val wager: Long,
+    val betCurrency: SeotdaBetCurrency = SeotdaBetCurrency.Money,
     val premium: Long = 0,
     val computerRanks: List<SeotdaHandRank> = listOf(computerRank),
     val playerPlacement: Int = 1,
@@ -59,6 +63,7 @@ data class SeotdaState(
     val playerCards: List<SeotdaCard> = emptyList(),
     val computerHands: List<List<SeotdaCard>> = emptyList(),
     val wager: Long = 0,
+    val betCurrency: SeotdaBetCurrency = SeotdaBetCurrency.Money,
     val raises: Int = 0,
     val replayReason: String? = null,
     val replayPlayerCards: List<SeotdaCard> = emptyList(),
@@ -77,6 +82,7 @@ data class ThreeCardSeotdaState(
     val playerCards: List<SeotdaCard> = emptyList(),
     val computerHands: List<List<SeotdaCard>> = emptyList(),
     val wager: Long = 0,
+    val betCurrency: SeotdaBetCurrency = SeotdaBetCurrency.Money,
     val raises: Int = 0,
     val selectedCardIndices: Set<Int> = emptySet(),
     val replayReason: String? = null,
@@ -125,7 +131,7 @@ class GambleManager @Inject constructor(
     suspend fun play(player: RpsChoice, wager: Long): Boolean {
         resetDayIfNeeded()
         val current = _state.value
-        if (currentAccount.isBlank() || current.playedToday >= 10 || wager !in allowedBaseWagers) return false
+        if (currentAccount.isBlank() || wager !in allowedBaseWagers) return false
         if (current.replayWager > 0 && wager != current.replayWager) return false
         val computer = preparedChoice
         val outcome = outcome(player, computer)
@@ -166,12 +172,16 @@ class GambleManager @Inject constructor(
         return true
     }
 
-    suspend fun startSeotda(baseWager: Long, playerCount: Int): Boolean {
+    suspend fun startSeotda(
+        baseWager: Long,
+        playerCount: Int,
+        betCurrency: SeotdaBetCurrency = SeotdaBetCurrency.Money,
+    ): Boolean {
         resetDayIfNeeded()
         val current = _seotdaState.value
-        if (baseWager !in allowedBaseWagers || playerCount !in 2..4) return false
-        if (currentAccount.isBlank() || current.playedToday >= 10 || current.isPlaying) return false
-        if (!repository.settleGamble(baseWager, 0)) return false
+        if (!validBaseWager(baseWager, betCurrency) || playerCount !in 2..4) return false
+        if (currentAccount.isBlank() || current.isPlaying) return false
+        if (!settleBet(betCurrency, baseWager, 0)) return false
         val cards = seotdaDeck().shuffled().take(playerCount * 2)
         val played = current.playedToday + 1
         prefs.edit().putInt(seotdaPlayKey(), played).apply()
@@ -181,6 +191,7 @@ class GambleManager @Inject constructor(
             playerCards = cards.take(2),
             computerHands = cards.drop(2).chunked(2),
             wager = baseWager,
+            betCurrency = betCurrency,
         )
         return true
     }
@@ -188,7 +199,7 @@ class GambleManager @Inject constructor(
     suspend fun raiseSeotda(): Boolean {
         val current = _seotdaState.value
         if (!current.isPlaying || current.raises >= SEOTDA_MAX_RAISES) return false
-        if (!repository.settleGamble(current.wager, 0)) return false
+        if (!settleBet(current.betCurrency, current.wager, 0)) return false
         val raised = current.copy(wager = Math.multiplyExact(current.wager, 2), raises = current.raises + 1)
         _seotdaState.value = raised
         if (raised.raises == SEOTDA_MAX_RAISES) settleSeotda(raised)
@@ -224,12 +235,16 @@ class GambleManager @Inject constructor(
         return true
     }
 
-    suspend fun startThreeCardSeotda(baseWager: Long, playerCount: Int): Boolean {
+    suspend fun startThreeCardSeotda(
+        baseWager: Long,
+        playerCount: Int,
+        betCurrency: SeotdaBetCurrency = SeotdaBetCurrency.Money,
+    ): Boolean {
         resetDayIfNeeded()
         val current = _threeCardSeotdaState.value
-        if (baseWager !in allowedBaseWagers || playerCount !in 2..4) return false
-        if (currentAccount.isBlank() || current.playedToday >= 10 || current.isPlaying) return false
-        if (!repository.settleGamble(baseWager, 0)) return false
+        if (!validBaseWager(baseWager, betCurrency) || playerCount !in 2..4) return false
+        if (currentAccount.isBlank() || current.isPlaying) return false
+        if (!settleBet(betCurrency, baseWager, 0)) return false
         val cards = seotdaDeck().shuffled().take(playerCount * 3)
         val played = current.playedToday + 1
         prefs.edit().putInt(threeCardSeotdaPlayKey(), played).apply()
@@ -239,6 +254,7 @@ class GambleManager @Inject constructor(
             playerCards = cards.take(3),
             computerHands = cards.drop(3).chunked(3),
             wager = baseWager,
+            betCurrency = betCurrency,
         )
         return true
     }
@@ -247,7 +263,7 @@ class GambleManager @Inject constructor(
         val current = _threeCardSeotdaState.value
         if (!current.isPlaying || current.raises >= SEOTDA_MAX_RAISES) return false
         if (current.raises == SEOTDA_MAX_RAISES - 1 && current.selectedCardIndices.size != 2) return false
-        if (!repository.settleGamble(current.wager, 0)) return false
+        if (!settleBet(current.betCurrency, current.wager, 0)) return false
         val raised = current.copy(wager = Math.multiplyExact(current.wager, 2), raises = current.raises + 1)
         _threeCardSeotdaState.value = raised
         if (raised.raises == SEOTDA_MAX_RAISES) settleThreeCardSeotda(raised)
@@ -300,29 +316,63 @@ class GambleManager @Inject constructor(
         val submittedCards = current.selectedCardIndices.sorted().map(current.playerCards::get)
         if (submittedCards.size != 2) return
         val playerRank = rankSeotda(submittedCards)
-        val computerRanks = current.computerHands.map { rankThreeCardSeotda(it, playerRank) }
-        if (playerRank.isNineFour || computerRanks.any { it.isNineFour }) {
+        var computerRanks = current.computerHands.map { rankThreeCardSeotda(it) }
+
+        // 이미 선택된 땡/광땡을 다른 패로 덮어쓰지 않고, 다른 참가자의
+        // 특수패 후보만 활성화해야 다인전 상성이 사라지지 않는다.
+        if ((listOf(playerRank) + computerRanks).any { it.ddaengNumber in 1..9 }) {
+            computerRanks = current.computerHands.mapIndexed { index, hand ->
+                val selected = computerRanks[index]
+                if (selected.ddaengNumber > 0 || selected.name.endsWith("광땡")) selected
+                else specialRankFromThreeCards(hand) { it.isDdaengCatcher } ?: selected
+            }
+        }
+        if ((listOf(playerRank) + computerRanks).any { it.name in CATCHABLE_BRIGHT_DDAENGS }) {
+            computerRanks = current.computerHands.mapIndexed { index, hand ->
+                val selected = computerRanks[index]
+                if (selected.name.endsWith("광땡")) selected
+                else specialRankFromThreeCards(hand) { it.isBrightCatcher } ?: selected
+            }
+        }
+        if (shouldReplayForNineFour(listOf(playerRank) + computerRanks)) {
             val holders = nineFourHolders(playerRank, computerRanks)
             replayThreeCardSeotda(current, "${participantsAsSubject(holders)} 9·4 구사라 재경기합니다.")
             return
         }
-        val comparisons = computerRanks.map { compareSeotda(playerRank, it) }
+        val allRanks = listOf(playerRank) + computerRanks
+        val specialWinners = tableSpecialWinnerIndices(allRanks)
+        if (specialWinners.size > 1) {
+            replayThreeCardSeotda(current, "특수패가 겹쳐 무승부로 재경기합니다.")
+            return
+        }
+        val specialWinner = specialWinners.singleOrNull()
+        val comparisons = computerRanks.mapIndexed { index, computerRank ->
+            when (specialWinner) {
+                0 -> 1
+                index + 1 -> -1
+                else -> compareSeotda(playerRank, computerRank)
+            }
+        }
         if (comparisons.any { it == 0 }) {
             replayThreeCardSeotda(current, "무승부로 판수 차감 없이 재경기합니다.")
             return
         }
         val outcome = if (comparisons.all { it > 0 }) SeotdaOutcome.Win else SeotdaOutcome.Lose
         val premium = ddaengPremium(outcome, playerRank)
-        val payout = when (outcome) {
-            SeotdaOutcome.Win -> Math.addExact(
-                Math.multiplyExact(current.wager, current.playerCount.toLong()),
-                premium,
-            )
+        val betPayout = when (outcome) {
+            SeotdaOutcome.Win -> Math.multiplyExact(current.wager, current.playerCount.toLong())
             SeotdaOutcome.Draw -> current.wager
             SeotdaOutcome.Lose -> 0
         }
-        if (payout > 0) repository.addMoney(payout)
+        if (current.betCurrency == SeotdaBetCurrency.Money) {
+            val moneyPayout = Math.addExact(betPayout, premium)
+            if (moneyPayout > 0) repository.addMoney(moneyPayout)
+        } else {
+            if (betPayout > 0) repository.addBlueChips(betPayout)
+            if (premium > 0) repository.addMoney(premium)
+        }
         val firstPlaceComputerIndex = if (outcome == SeotdaOutcome.Win) null else {
+            specialWinner?.takeIf { it > 0 }?.minus(1) ?:
             computerRanks.indices.maxWithOrNull { first, second ->
                 compareSeotda(computerRanks[first], computerRanks[second])
             }
@@ -332,7 +382,8 @@ class GambleManager @Inject constructor(
         val playerPlacement = 1 + comparisons.count { it < 0 }
         _threeCardSeotdaState.value = current.copy(
             result = SeotdaResult(
-                outcome, playerRank, strongestComputer, current.wager, premium, computerRanks,
+                outcome, playerRank, strongestComputer, current.wager, current.betCurrency,
+                premium, computerRanks,
                 playerPlacement, firstPlaceComputerIndex,
             ),
         )
@@ -341,28 +392,45 @@ class GambleManager @Inject constructor(
     private suspend fun settleSeotda(current: SeotdaState) {
         val playerRank = rankSeotda(current.playerCards)
         val computerRanks = current.computerHands.map(::rankSeotda)
-        if (playerRank.isNineFour || computerRanks.any { it.isNineFour }) {
+        if (shouldReplayForNineFour(listOf(playerRank) + computerRanks)) {
             val holders = nineFourHolders(playerRank, computerRanks)
             replaySeotda(current, "${participantsAsSubject(holders)} 9·4 구사라 재경기합니다.")
             return
         }
-        val comparisons = computerRanks.map { compareSeotda(playerRank, it) }
+        val allRanks = listOf(playerRank) + computerRanks
+        val specialWinners = tableSpecialWinnerIndices(allRanks)
+        if (specialWinners.size > 1) {
+            replaySeotda(current, "특수패가 겹쳐 무승부로 재경기합니다.")
+            return
+        }
+        val specialWinner = specialWinners.singleOrNull()
+        val comparisons = computerRanks.mapIndexed { index, computerRank ->
+            when (specialWinner) {
+                0 -> 1
+                index + 1 -> -1
+                else -> compareSeotda(playerRank, computerRank)
+            }
+        }
         if (comparisons.any { it == 0 }) {
             replaySeotda(current, "무승부로 판수 차감 없이 재경기합니다.")
             return
         }
         val outcome = if (comparisons.all { it > 0 }) SeotdaOutcome.Win else SeotdaOutcome.Lose
         val premium = ddaengPremium(outcome, playerRank)
-        val payout = when (outcome) {
-            SeotdaOutcome.Win -> Math.addExact(
-                Math.multiplyExact(current.wager, current.playerCount.toLong()),
-                premium,
-            )
+        val betPayout = when (outcome) {
+            SeotdaOutcome.Win -> Math.multiplyExact(current.wager, current.playerCount.toLong())
             SeotdaOutcome.Draw -> current.wager
             SeotdaOutcome.Lose -> 0
         }
-        if (payout > 0) repository.addMoney(payout)
+        if (current.betCurrency == SeotdaBetCurrency.Money) {
+            val moneyPayout = Math.addExact(betPayout, premium)
+            if (moneyPayout > 0) repository.addMoney(moneyPayout)
+        } else {
+            if (betPayout > 0) repository.addBlueChips(betPayout)
+            if (premium > 0) repository.addMoney(premium)
+        }
         val firstPlaceComputerIndex = if (outcome == SeotdaOutcome.Win) null else {
+            specialWinner?.takeIf { it > 0 }?.minus(1) ?:
             computerRanks.indices.maxWithOrNull { first, second ->
                 compareSeotda(computerRanks[first], computerRanks[second])
             }
@@ -372,7 +440,8 @@ class GambleManager @Inject constructor(
         val playerPlacement = 1 + comparisons.count { it < 0 }
         _seotdaState.value = current.copy(
             result = SeotdaResult(
-                outcome, playerRank, strongestComputer, current.wager, premium, computerRanks,
+                outcome, playerRank, strongestComputer, current.wager, current.betCurrency,
+                premium, computerRanks,
                 playerPlacement, firstPlaceComputerIndex,
             ),
         )
@@ -385,6 +454,20 @@ class GambleManager @Inject constructor(
             "18광땡", "13광땡" -> BRIGHT_DDAENG_PREMIUM
             else -> if (rank.ddaengNumber > 0) rank.ddaengNumber * DDAENG_PREMIUM_UNIT else 0L
         }
+    }
+
+    private fun validBaseWager(wager: Long, currency: SeotdaBetCurrency): Boolean =
+        if (currency == SeotdaBetCurrency.Money) wager in allowedBaseWagers
+        else wager == BLUE_CHIP_BASE_WAGER
+
+    private suspend fun settleBet(
+        currency: SeotdaBetCurrency,
+        wager: Long,
+        payout: Long,
+    ): Boolean = if (currency == SeotdaBetCurrency.Money) {
+        repository.settleGamble(wager, payout)
+    } else {
+        repository.settleBlueChipGamble(wager, payout)
     }
 
     private fun replaySeotda(current: SeotdaState, reason: String) {
@@ -457,6 +540,7 @@ class GambleManager @Inject constructor(
         const val DDAENG_PREMIUM_UNIT = 1_000_000L
         const val BRIGHT_DDAENG_PREMIUM = 20_000_000L
         const val THIRTY_EIGHT_BRIGHT_PREMIUM = 100_000_000L
+        const val BLUE_CHIP_BASE_WAGER = 1L
         val DEFAULT_SEOTDA_OPPONENT_NAMES = listOf("졸린", "토끼", "콜라")
 
         private fun participantsAsSubject(names: List<String>): String = when (names.size) {
@@ -491,8 +575,17 @@ class GambleManager @Inject constructor(
             if (months == listOf(3, 7)) {
                 return SeotdaHandRank(6_000, "땡잡이", isDdaengCatcher = true)
             }
+            if (months == listOf(4, 7)) {
+                return SeotdaHandRank(6_001, "암행어사", isBrightCatcher = true)
+            }
             if (months == listOf(4, 9)) {
-                return SeotdaHandRank(6_003, "구사", isNineFour = true)
+                val mungtunguri = cards.all { it.variant == 1 }
+                return SeotdaHandRank(
+                    strength = 6_003,
+                    name = if (mungtunguri) "멍텅구리 구사" else "구사",
+                    isNineFour = true,
+                    isMungtunguriNineFour = mungtunguri,
+                )
             }
             val named = mapOf(
                 listOf(1, 2) to SeotdaHandRank(7_006, "알리"),
@@ -517,18 +610,75 @@ class GambleManager @Inject constructor(
                 listOf(cards[0], cards[2]),
                 listOf(cards[1], cards[2]),
             ).map(::rankSeotda).maxBy {
-                if (opponent != null && it.isDdaengCatcher && opponent.ddaengNumber in 1..9) 20_000
-                else it.strength
+                rankAgainst(it, opponent)
             }
         }
+
+        private fun specialRankFromThreeCards(
+            cards: List<SeotdaCard>,
+            predicate: (SeotdaHandRank) -> Boolean,
+        ): SeotdaHandRank? = listOf(
+            listOf(cards[0], cards[1]),
+            listOf(cards[0], cards[2]),
+            listOf(cards[1], cards[2]),
+        ).map(::rankSeotda).firstOrNull(predicate)
 
         fun compareSeotda(first: SeotdaHandRank, second: SeotdaHandRank): Int {
             if (first.isDdaengCatcher && second.ddaengNumber in 1..9) return 1
             if (second.isDdaengCatcher && first.ddaengNumber in 1..9) return -1
+            if (first.isBrightCatcher && second.name in CATCHABLE_BRIGHT_DDAENGS) return 1
+            if (second.isBrightCatcher && first.name in CATCHABLE_BRIGHT_DDAENGS) return -1
             return first.strength.compareTo(second.strength)
         }
 
-        private fun rankAgainst(rank: SeotdaHandRank, opponent: SeotdaHandRank): Int =
-            if (rank.isDdaengCatcher && opponent.ddaengNumber in 1..9) 20_000 else rank.strength
+        private fun rankAgainst(rank: SeotdaHandRank, opponent: SeotdaHandRank?): Int = when {
+            opponent != null && rank.isDdaengCatcher && opponent.ddaengNumber in 1..9 -> 20_000
+            opponent != null && rank.isBrightCatcher && opponent.name in CATCHABLE_BRIGHT_DDAENGS -> 19_000
+            else -> rank.strength
+        }
+
+        private fun shouldReplayForNineFour(ranks: List<SeotdaHandRank>): Boolean {
+            val nineFourRanks = ranks.filter { it.isNineFour }
+            if (nineFourRanks.isEmpty()) return false
+
+            // 다인전에서도 땡과 땡잡이가 함께 있으면 땡잡이의 특수승을 먼저 적용한다.
+            if (ranks.any { it.isDdaengCatcher } && ranks.any { it.ddaengNumber in 1..9 }) {
+                return false
+            }
+            // 암행어사와 잡을 수 있는 광땡이 함께 있으면 암행어사의 특수승을 먼저 적용한다.
+            if (ranks.any { it.isBrightCatcher } && ranks.any { it.name in CATCHABLE_BRIGHT_DDAENGS }) {
+                return false
+            }
+
+            val strongestOther = ranks.filterNot { it.isNineFour }.maxOfOrNull { it.strength }
+                ?: return true
+            return if (nineFourRanks.any { it.isMungtunguriNineFour }) {
+                strongestOther <= 8_010 // 장땡 이하일 때 재경기
+            } else {
+                strongestOther <= 7_006 // 알리 이하일 때 재경기
+            }
+        }
+
+        internal fun tableSpecialWinnerIndices(ranks: List<SeotdaHandRank>): List<Int> {
+            // 38광땡은 어떤 잡이 패로도 잡을 수 없는 절대 최상위 패다.
+            if (ranks.any { it.name == "38광땡" }) return emptyList()
+
+            val normalBest = ranks.maxOfOrNull { it.strength } ?: return emptyList()
+            val specialScores = buildMap<Int, Int> {
+                if (ranks.any { it.ddaengNumber in 1..9 }) {
+                    ranks.indices.filter { ranks[it].isDdaengCatcher }
+                        .forEach { put(it, 9_500) }
+                }
+                if (ranks.any { it.name in CATCHABLE_BRIGHT_DDAENGS }) {
+                    ranks.indices.filter { ranks[it].isBrightCatcher }
+                        .forEach { put(it, 9_950) }
+                }
+            }
+            val bestSpecial = specialScores.values.maxOrNull() ?: return emptyList()
+            if (bestSpecial <= normalBest) return emptyList()
+            return specialScores.filterValues { it == bestSpecial }.keys.toList()
+        }
+
+        private val CATCHABLE_BRIGHT_DDAENGS = setOf("13광땡", "18광땡")
     }
 }

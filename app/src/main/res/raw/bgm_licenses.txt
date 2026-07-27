@@ -18,3 +18,14 @@ File used:
 License: CC0 (no attribution required)
 
 Downloaded: 2026-07-26
+
+Sound effects:
+https://opengameart.org/content/freeze-spell-0
+Author: artisticdude
+File used: freeze.wav
+License: CC0
+
+https://opengameart.org/content/purchasing-sound-effect
+Author: Spring Spring
+File used: snd_purchase.wav
+License: CC0

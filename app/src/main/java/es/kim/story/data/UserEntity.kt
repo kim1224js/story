@@ -10,4 +10,6 @@ data class UserEntity(
     val seotdaName1: String = "졸린",
     val seotdaName2: String = "토끼",
     val seotdaName3: String = "콜라",
+    val blueChips: Long = 0L,
+    val premiumIdColor: Boolean = false,
 )

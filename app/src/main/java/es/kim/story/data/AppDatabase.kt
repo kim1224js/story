@@ -4,7 +4,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [UserEntity::class], version = 7, exportSchema = false)
+@Database(entities = [UserEntity::class], version = 8, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun userDao(): UserDao
 
@@ -48,6 +48,12 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE user ADD COLUMN seotdaName1 TEXT NOT NULL DEFAULT '졸린'")
                 db.execSQL("ALTER TABLE user ADD COLUMN seotdaName2 TEXT NOT NULL DEFAULT '토끼'")
                 db.execSQL("ALTER TABLE user ADD COLUMN seotdaName3 TEXT NOT NULL DEFAULT '콜라'")
+            }
+        }
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE user ADD COLUMN blueChips INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE user ADD COLUMN premiumIdColor INTEGER NOT NULL DEFAULT 0")
             }
         }
     }
