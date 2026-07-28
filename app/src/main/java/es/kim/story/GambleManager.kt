@@ -105,6 +105,7 @@ class GambleManager @Inject constructor(
     private var currentAccount = ""
     private var opponentNames = DEFAULT_SEOTDA_OPPONENT_NAMES
     private var allowedBaseWagers = baseWagersForChapter(1)
+    private var currentStageClearCost = stageClearCost(1)
     private var loadedDate = LocalDate.now().toString()
     private var preparedChoice = randomChoice()
     private val _state = MutableStateFlow(GambleState())
@@ -118,6 +119,7 @@ class GambleManager @Inject constructor(
         opponentNames = seotdaOpponentNames.takeIf { it.size == 3 && it.none(String::isBlank) }
             ?: DEFAULT_SEOTDA_OPPONENT_NAMES
         allowedBaseWagers = baseWagersForChapter(chapter)
+        currentStageClearCost = stageClearCost(chapter)
         if (currentAccount == userId) return
         currentAccount = userId
         loadedDate = LocalDate.now().toString()
@@ -360,7 +362,7 @@ class GambleManager @Inject constructor(
         val outcome = if (comparisons.all { it > 0 }) SeotdaOutcome.Win else SeotdaOutcome.Lose
         val premium = ddaengPremium(outcome, playerRank)
         val betPayout = when (outcome) {
-            SeotdaOutcome.Win -> Math.multiplyExact(current.wager, current.playerCount.toLong())
+            SeotdaOutcome.Win -> Math.multiplyExact(current.wager, 2L)
             SeotdaOutcome.Draw -> current.wager
             SeotdaOutcome.Lose -> 0
         }
@@ -418,7 +420,7 @@ class GambleManager @Inject constructor(
         val outcome = if (comparisons.all { it > 0 }) SeotdaOutcome.Win else SeotdaOutcome.Lose
         val premium = ddaengPremium(outcome, playerRank)
         val betPayout = when (outcome) {
-            SeotdaOutcome.Win -> Math.multiplyExact(current.wager, current.playerCount.toLong())
+            SeotdaOutcome.Win -> Math.multiplyExact(current.wager, 2L)
             SeotdaOutcome.Draw -> current.wager
             SeotdaOutcome.Lose -> 0
         }
@@ -450,9 +452,9 @@ class GambleManager @Inject constructor(
     private fun ddaengPremium(outcome: SeotdaOutcome, rank: SeotdaHandRank): Long {
         if (outcome != SeotdaOutcome.Win) return 0L
         return when (rank.name) {
-            "38광땡" -> THIRTY_EIGHT_BRIGHT_PREMIUM
-            "18광땡", "13광땡" -> BRIGHT_DDAENG_PREMIUM
-            else -> if (rank.ddaengNumber > 0) rank.ddaengNumber * DDAENG_PREMIUM_UNIT else 0L
+            "38광땡" -> currentStageClearCost / 4L
+            "18광땡", "13광땡" -> currentStageClearCost / 10L
+            else -> if (rank.ddaengNumber > 0) currentStageClearCost * rank.ddaengNumber / 100L else 0L
         }
     }
 
@@ -530,9 +532,9 @@ class GambleManager @Inject constructor(
         fun baseWagersForChapter(chapter: Int): List<Long> {
             val clearCost = stageClearCost(chapter)
             return listOf(
-                (clearCost / 200L).coerceAtLeast(1L),
                 (clearCost / 100L).coerceAtLeast(1L),
-                (clearCost / 10L).coerceAtLeast(1L),
+                (clearCost / 40L).coerceAtLeast(1L),
+                (clearCost / 20L).coerceAtLeast(1L),
             )
         }
         const val SEOTDA_MAX_RAISES = 3

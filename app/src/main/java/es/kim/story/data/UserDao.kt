@@ -12,8 +12,10 @@ import kotlinx.coroutines.flow.Flow
     @Upsert suspend fun save(user: UserEntity)
     @Query("DELETE FROM user WHERE userId = :userId")
     suspend fun deleteUser(userId: String): Int
-    @Query("UPDATE user SET money = money + :amount WHERE userId = :userId")
+    @Query("UPDATE user SET money = CASE WHEN :amount <= 0 THEN money WHEN money >= 100000000 - :amount THEN 100000000 ELSE money + :amount END WHERE userId = :userId")
     suspend fun addMoney(userId: String, amount: Long)
+    @Query("UPDATE user SET money = 100000000 WHERE userId = :userId AND money > 100000000")
+    suspend fun capMoney(userId: String)
     @Query("UPDATE user SET gender = :gender WHERE userId = :userId")
     suspend fun updateGender(userId: String, gender: String)
     @Query("UPDATE user SET money = :money WHERE userId = :userId")

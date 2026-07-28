@@ -444,7 +444,7 @@ private fun WorkView(
     val user by viewModel.user.collectAsState()
     val rewardMultiplier = chapterRewardMultiplier(user?.chapter ?: 1)
     val currentClearCost = stageClearCost(user?.chapter ?: 1)
-    val moleRewardPerHit = (currentClearCost / 100L).coerceAtLeast(1L)
+    val moleRewardPerHit = (currentClearCost / 1_000L).coerceAtLeast(1L)
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var cancelDialog by remember { mutableStateOf(false) }
     var claimDialogJob by remember { mutableStateOf<PartTimeJob?>(null) }
@@ -465,7 +465,7 @@ private fun WorkView(
     var iceGameResult by remember { mutableStateOf<String?>(null) }
     var icePenguinFound by remember { mutableStateOf(false) }
     var mazeResult by remember { mutableStateOf<String?>(null) }
-    val icePenguinReward = (currentClearCost / 10L).coerceAtLeast(1L)
+    val icePenguinReward = (currentClearCost / 20L).coerceAtLeast(1L)
     val iceToneGenerator = remember { ToneGenerator(AudioManager.STREAM_MUSIC, 85) }
     val mazeToneGenerator = remember { ToneGenerator(AudioManager.STREAM_MUSIC, 72) }
     val iceSoundPool = remember { SoundPool.Builder().setMaxStreams(3).build() }
@@ -509,6 +509,7 @@ private fun WorkView(
             when (workTab) {
                 2 -> R.raw.bgm_bells_of_winter
                 3 -> R.raw.bgm_creed_of_course
+                4 -> R.raw.bgm_fairy_lights
                 else -> R.raw.bgm_jaunt
             },
         )
@@ -594,6 +595,11 @@ private fun WorkView(
                 selected = workTab == 3,
                 onClick = { if (!moleRunning && moleCountdown == null) workTab = 3 },
                 text = { Text("미로") },
+            )
+            Tab(
+                selected = workTab == 4,
+                onClick = { if (!moleRunning && moleCountdown == null) workTab = 4 },
+                text = { Text("퍼즐") },
             )
         }
         Spacer(Modifier.height(12.dp))
@@ -776,7 +782,7 @@ private fun WorkView(
                     }
                 },
             )
-        } else {
+        } else if (workTab == 3) {
             LaunchedEffect(user?.userId) { viewModel.ensureMaze() }
             MazeGameView(
                 modifier = Modifier.fillMaxWidth().weight(1f),
@@ -788,7 +794,7 @@ private fun WorkView(
                     val targetY = state.mazeY + dy
                     if (viewModel.moveMaze(targetX, targetY, itemId)) {
                         mazeToneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 65)
-                        if (targetX == 49 && targetY == 49) {
+                        if (targetY * MAZE_SIZE + targetX in mazeExitCells(state.mazeSeed)) {
                             viewModel.completeMaze(currentClearCost)
                             mazeToneGenerator.startTone(ToneGenerator.TONE_PROP_ACK, 650)
                             mazeResult = "미로 탈출 성공!\n${currentClearCost.won()} 획득"
@@ -805,6 +811,13 @@ private fun WorkView(
                         }
                     }
                 },
+            )
+        } else {
+            PuzzleGameView(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                clearReward = currentClearCost,
+                bestScore = state.puzzleBestScore,
+                onReward = { score -> viewModel.claimPuzzleReward(score, currentClearCost) },
             )
         }
     }
@@ -1390,9 +1403,10 @@ private fun IceCellArtwork(broken: Boolean, seed: Int) {
 private data class MazeLayout(
     val openings: IntArray,
     val itemCells: Set<Int>,
+    val exitCells: Set<Int>,
 )
 
-private const val MAZE_SIZE = 50
+private const val MAZE_SIZE = MAZE_GRID_SIZE
 private const val MAZE_NORTH = 1
 private const val MAZE_EAST = 2
 private const val MAZE_SOUTH = 4
@@ -1436,7 +1450,8 @@ private fun generateMazeLayout(seed: Long): MazeLayout {
         }
     }
 
-    val goal = total - 1
+    val exits = mazeExitCells(seed)
+    val goal = exits.first()
     val parent = IntArray(total) { -1 }
     val queue = ArrayDeque<Int>()
     queue.addLast(0)
@@ -1470,7 +1485,7 @@ private fun generateMazeLayout(seed: Long): MazeLayout {
         else solution[(number * (solution.lastIndex.toDouble() / 11.0)).roundToLong().toInt()
             .coerceIn(1, solution.lastIndex - 1)]
     }.toSet()
-    return MazeLayout(openings, items)
+    return MazeLayout(openings, items, exits)
 }
 
 @Composable
@@ -1537,7 +1552,7 @@ private fun MazeGameView(
                 Text("🧭 무릉도원 미로", color = Color(0xFF00695C),
                     style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
                 Text(
-                    "50×50 미로 · 캐릭터 중심 3×3 시야",
+                    "30×30 랜덤 미로 · 랜덤 출구 2개 · 4×4 시야",
                     color = Color(0xFF456A64),
                     fontWeight = FontWeight.Bold,
                 )
@@ -1561,25 +1576,29 @@ private fun MazeGameView(
                         .clip(RoundedCornerShape(18.dp))
                         .border(3.dp, Color(0xFF5D4037), RoundedCornerShape(18.dp)),
                 ) {
-                    repeat(3) { visibleRow ->
+                    repeat(4) { visibleRow ->
                         Row(Modifier.weight(1f).fillMaxWidth()) {
-                            repeat(3) { visibleColumn ->
+                            repeat(4) { visibleColumn ->
                                 val mapX = state.mazeX + visibleColumn - 1
                                 val mapY = state.mazeY + visibleRow - 1
                                 val inMap = mapX in 0 until MAZE_SIZE && mapY in 0 until MAZE_SIZE
                                 val cellIndex = if (inMap) mapY * MAZE_SIZE + mapX else -1
                                 val openings = if (inMap) maze.openings[cellIndex] else 0
                                 val isPlayer = visibleRow == 1 && visibleColumn == 1
-                                val isGoal = cellIndex == MAZE_SIZE * MAZE_SIZE - 1
+                                val isOuterLine = visibleRow == 0 || visibleRow == 3 ||
+                                    visibleColumn == 0 || visibleColumn == 3
+                                val isVisited = cellIndex in state.mazeVisitedCells
+                                val isVisible = inMap && (!isOuterLine || isVisited)
+                                val isGoal = cellIndex in maze.exitCells
                                 val hasItem = cellIndex in maze.itemCells &&
                                     cellIndex !in state.mazeCollectedItems
 
                                 Box(
                                     Modifier.weight(1f).fillMaxHeight()
-                                        .background(if (inMap) Color(0xFFD7CCC8) else Color(0xFF17252B)),
+                                        .background(if (isVisible) Color(0xFFD7CCC8) else Color(0xFF17252B)),
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    if (inMap) {
+                                    if (isVisible) {
                                         Image(
                                             painter = painterResource(R.drawable.maze_floor),
                                             contentDescription = null,
@@ -1689,7 +1708,7 @@ private fun MazeGameView(
                         Text("미로를 완주했습니다!", color = Color(0xFF2E7D32),
                             fontWeight = FontWeight.ExtraBold)
                         Button(onClick = onNewMaze, modifier = Modifier.fillMaxWidth()) {
-                            Text("새로운 50×50 미로 시작")
+                            Text("새로운 30×30 미로 시작")
                         }
                     }
                     remaining == 0 -> Text(
@@ -2784,7 +2803,7 @@ private fun SeotdaView(viewModel: MainViewModel, speakResult: (String) -> Unit) 
                     Text(
                         when (result.outcome) {
                             SeotdaOutcome.Win ->
-                                "+${seotdaBetLabel(result.wager * (state.playerCount - 1), result.betCurrency)}" +
+                                "+${seotdaBetLabel(result.wager, result.betCurrency)}" +
                                 if (result.premium > 0) "\n족보 보너스 +${result.premium.won()}" else ""
                             SeotdaOutcome.Draw -> "판돈 반환"
                             SeotdaOutcome.Lose -> "-${seotdaBetLabel(result.wager, result.betCurrency)}"
@@ -3093,7 +3112,7 @@ private fun ThreeCardSeotdaView(viewModel: MainViewModel, speakResult: (String) 
                     Text(
                         when (result.outcome) {
                             SeotdaOutcome.Win ->
-                                "+${seotdaBetLabel(result.wager * (state.playerCount - 1), result.betCurrency)}" +
+                                "+${seotdaBetLabel(result.wager, result.betCurrency)}" +
                                 if (result.premium > 0) "\n족보 보너스 +${result.premium.won()}" else ""
                             SeotdaOutcome.Draw -> "판돈 반환"
                             SeotdaOutcome.Lose -> "-${seotdaBetLabel(result.wager, result.betCurrency)}"
@@ -3443,7 +3462,7 @@ private fun StoryView(viewModel: MainViewModel) {
                         ) {
                             Column(Modifier.fillMaxWidth().padding(14.dp)) {
                                 Text("클리어 조건", fontWeight = FontWeight.ExtraBold)
-                                Text("보유 재화 ${chapter.clearCost.won()}")
+                                Text("클리어 비용 ${chapter.clearCost.won()} · 상한의 ${String.format(Locale.KOREA, "%.1f", stageClearPercent(chapter.number))}%")
                                 Text("현재 재화 ${(user?.money ?: 0L).won()}",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }

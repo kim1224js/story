@@ -7,6 +7,25 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
+internal const val MAZE_GRID_SIZE = 30
+
+internal fun mazeExitCells(seed: Long): Set<Int> {
+    val last = MAZE_GRID_SIZE - 1
+    val boundary = buildSet {
+        for (index in 0 until MAZE_GRID_SIZE) {
+            add(index)
+            add(last * MAZE_GRID_SIZE + index)
+            add(index * MAZE_GRID_SIZE)
+            add(index * MAZE_GRID_SIZE + last)
+        }
+    }.filter { cell ->
+        val x = cell % MAZE_GRID_SIZE
+        val y = cell / MAZE_GRID_SIZE
+        cell != 0 && x + y >= MAZE_GRID_SIZE / 2
+    }.toMutableList()
+    java.util.Collections.shuffle(boundary, java.util.Random(seed xor 0x5EED_2E17L))
+    return boundary.take(2).toSet()
+}
 
 data class PartTimeJob(val id: String, val title: String, val durationMillis: Long, val durationLabel: String, val reward: Long, val oncePerDay: Boolean = false)
 data class ActiveJob(val jobId: String, val startedAt: Long)
@@ -25,14 +44,16 @@ data class WorkState(
     val mazeMovesToday: Int = 0,
     val mazeBonusMovesToday: Int = 0,
     val mazeCollectedItems: Set<Int> = emptySet(),
+    val mazeVisitedCells: Set<Int> = setOf(0),
     val mazeCompleted: Boolean = false,
+    val puzzleBestScore: Int = 0,
 )
 
 val partTimeJobs = listOf(
     PartTimeJob("cafe_4", "영자네 카페 알바", 4 * 60 * 60 * 1_000L, "4시간", 100_000),
     PartTimeJob("cafe_8", "영자네 카페 알바", 8 * 60 * 60 * 1_000L, "8시간", 150_000),
     PartTimeJob("cafe_12", "영자네 카페 알바", 12 * 60 * 60 * 1_000L, "12시간", 200_000),
-    PartTimeJob("walk_kkami", "까미 산책하기", 30 * 60 * 1_000L, "30분 · 하루 한 번", 200_000, true),
+    PartTimeJob("walk_kkami", "김은성 산책하기", 30 * 60 * 1_000L, "30분 · 하루 한 번", 200_000, true),
 )
 
 @Singleton
@@ -107,13 +128,14 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
                 mazeMovesToday = movesToday + 1,
                 mazeBonusMovesToday = bonusToday + if (isNewItem) 1 else 0,
                 mazeCollectedItems = collected,
+                mazeVisitedCells = current.mazeVisitedCells + (targetY * MAZE_GRID_SIZE + targetX),
             ),
         )
     }
 
     fun completeMaze(): Boolean {
         val current = _state.value
-        if (current.mazeCompleted || current.mazeX != 49 || current.mazeY != 49) return false
+        if (current.mazeCompleted || current.mazeY * MAZE_GRID_SIZE + current.mazeX !in mazeExitCells(current.mazeSeed)) return false
         return update(current.copy(mazeCompleted = true))
     }
 
@@ -140,11 +162,17 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
                 mazeMovesToday = 0,
                 mazeBonusMovesToday = 0,
                 mazeCollectedItems = emptySet(),
+                mazeVisitedCells = setOf(0),
                 mazeCompleted = false,
             ),
         )
     }
 
+
+    fun recordPuzzleScore(score: Int): Boolean {
+        if (score <= _state.value.puzzleBestScore) return false
+        return update(_state.value.copy(puzzleBestScore = score))
+    }
     fun deleteAccountData(userId: String) {
         val editor = prefs.edit()
         prefs.all.keys.filter { it.startsWith("$userId|") }.forEach(editor::remove)
@@ -166,6 +194,10 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
         val today = LocalDate.now().toString()
         val savedMoleDate = prefs.getString(key("mole_play_date"), null)
         val savedIceDate = prefs.getString(key("ice_play_date"), null)
+        val savedMazeX = prefs.getInt(key("maze_x"), 0).coerceIn(0, MAZE_GRID_SIZE - 1)
+        val savedMazeY = prefs.getInt(key("maze_y"), 0).coerceIn(0, MAZE_GRID_SIZE - 1)
+        val savedVisited = prefs.getStringSet(key("maze_visited_cells"), setOf("0"))
+            .orEmpty().mapNotNull(String::toIntOrNull).filter { it in 0 until MAZE_GRID_SIZE * MAZE_GRID_SIZE }.toSet()
         return WorkState(
             activeJob = prefs.getString(key("active_job_id"), null)?.let {
                 ActiveJob(it, prefs.getLong(key("active_job_started_at"), 0L))
@@ -176,8 +208,8 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
             icePlayDate = savedIceDate,
             icePlaysToday = if (savedIceDate == today) prefs.getInt(key("ice_plays_today"), 0) else 0,
             mazeSeed = prefs.getLong(key("maze_seed"), 0L),
-            mazeX = prefs.getInt(key("maze_x"), 0),
-            mazeY = prefs.getInt(key("maze_y"), 0),
+            mazeX = savedMazeX,
+            mazeY = savedMazeY,
             mazeMoveDate = prefs.getString(key("maze_move_date"), null),
             mazeMovesToday = if (prefs.getString(key("maze_move_date"), null) == today) {
                 prefs.getInt(key("maze_moves_today"), 0)
@@ -191,7 +223,9 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
             },
             mazeCollectedItems = prefs.getStringSet(key("maze_collected_items"), emptySet())
                 .orEmpty().mapNotNull(String::toIntOrNull).toSet(),
+            mazeVisitedCells = savedVisited + 0 + (savedMazeY * MAZE_GRID_SIZE + savedMazeX),
             mazeCompleted = prefs.getBoolean(key("maze_completed"), false),
+            puzzleBestScore = prefs.getInt(key("puzzle_best_score"), 0),
         )
     }
 
@@ -216,7 +250,12 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
                 key("maze_collected_items"),
                 value.mazeCollectedItems.map(Int::toString).toSet(),
             )
+            .putStringSet(
+                key("maze_visited_cells"),
+                value.mazeVisitedCells.map(Int::toString).toSet(),
+            )
             .putBoolean(key("maze_completed"), value.mazeCompleted)
+            .putInt(key("puzzle_best_score"), value.puzzleBestScore)
             .apply()
         return true
     }

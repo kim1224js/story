@@ -73,6 +73,16 @@ import javax.inject.Inject
         val currentUser = user.value ?: return
         viewModelScope.launch { repository.addMoney(currentUser.userId, reward) }
     }
+    fun claimPuzzleReward(score: Int, clearReward: Long) {
+        workManager.recordPuzzleScore(score)
+        if (score <= 0 || clearReward <= 0) return
+        val currentUser = user.value ?: return
+        val reward = runCatching {
+            Math.multiplyExact(score.toLong(), clearReward / 1_000L)
+        }.getOrDefault(0L)
+        if (reward <= 0) return
+        viewModelScope.launch { repository.addMoney(currentUser.userId, reward) }
+    }
     fun claimJob(job: PartTimeJob) {
         val currentUser = user.value ?: return
         val reward = scaledChapterReward(job.reward, currentUser.chapter)
@@ -91,7 +101,7 @@ import javax.inject.Inject
     fun changeGender(currentGender: String) = viewModelScope.launch {
         repository.updateGender(if (currentGender == "남성") "여성" else "남성")
     }
-    fun switchAccount(userId: String) = repository.switchAccount(userId)
+    fun switchAccount(userId: String) = viewModelScope.launch { repository.switchAccount(userId) }
     fun deleteCharacter(userId: String) = viewModelScope.launch {
         if (repository.deleteAccount(userId)) {
             workManager.deleteAccountData(userId)

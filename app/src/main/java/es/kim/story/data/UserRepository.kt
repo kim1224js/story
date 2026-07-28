@@ -1,6 +1,7 @@
 package es.kim.story.data
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
+import es.kim.story.MAX_PLAYER_MONEY
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -25,12 +26,17 @@ import javax.inject.Singleton
         switchAccount(userId)
         return true
     }
-    fun switchAccount(userId: String) {
+    suspend fun switchAccount(userId: String) {
+        dao.capMoney(userId)
         prefs.edit().putString("user_id", userId).apply()
         activeUserId.value = userId
     }
-    suspend fun addMoney(amount: Long) = dao.addMoney(activeUserId.value, amount)
-    suspend fun addMoney(userId: String, amount: Long) = dao.addMoney(userId, amount)
+    suspend fun addMoney(amount: Long) {
+        if (amount > 0) dao.addMoney(activeUserId.value, amount.coerceAtMost(MAX_PLAYER_MONEY))
+    }
+    suspend fun addMoney(userId: String, amount: Long) {
+        if (amount > 0) dao.addMoney(userId, amount.coerceAtMost(MAX_PLAYER_MONEY))
+    }
     suspend fun spendMoney(amount: Long): Boolean =
         amount > 0 && dao.spendMoney(activeUserId.value, amount) == 1
     suspend fun updateSeotdaNames(names: List<String>): Boolean {
@@ -61,7 +67,7 @@ import javax.inject.Singleton
         dao.clearStoryChapter(activeUserId.value, chapter, cost) == 1
     suspend fun updateCurrentField(column: String, value: String): Boolean = when (column.lowercase()) {
         "money" -> value.toLongOrNull()?.takeIf { it >= 0 }?.let {
-            dao.setMoney(activeUserId.value, it); true
+            dao.setMoney(activeUserId.value, it.coerceAtMost(MAX_PLAYER_MONEY)); true
         } ?: false
         "chapter" -> value.toIntOrNull()?.takeIf { it >= 1 }?.let {
             dao.setChapter(activeUserId.value, it); true
@@ -74,7 +80,7 @@ import javax.inject.Singleton
 
     companion object {
         const val MAX_ACCOUNTS = 3
-        const val BLUE_CHIP_EXCHANGE_COST = 1_000_000_000_000_000L
+        const val BLUE_CHIP_EXCHANGE_COST = 10_000_000L
         const val PREMIUM_ID_COLOR_COST = 100L
     }
 }
