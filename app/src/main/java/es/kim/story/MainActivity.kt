@@ -336,7 +336,7 @@ private fun AppBackgroundMusic(musicRes: Int, enabled: Boolean, volume: Float) {
                     if ((!canUseAccount && normalizedId.isNotBlank()) || limitError) {
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "계정은 최대 3개입니다. 기존 계정으로 접속하거나 캐릭터를 삭제해 주세요.",
+                            "로컬 프로필은 최대 3개입니다. 기존 프로필을 선택하거나 다른 캐릭터를 삭제해 주세요.",
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -362,7 +362,7 @@ private fun AppBackgroundMusic(musicRes: Int, enabled: Boolean, volume: Float) {
                     }
                     Spacer(Modifier.height(14.dp))
                     Text(
-                        text = "계정은 최대 3개까지 만들 수 있어요",
+                        text = "로컬 프로필은 최대 3개까지 만들 수 있어요",
                         color = Color(0xFF746142).copy(alpha = 0.88f),
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = TextAlign.Center,

@@ -11,7 +11,7 @@ composeBom = "2026.02.01"
 room = "2.8.4"
 hilt = "2.59"
 ksp = "2.2.10-2.0.2"
-healthConnect = "1.1.0-alpha12"
+healthConnect = "1.1.0"
 lifecycle = "2.10.0"
 
 [libraries]

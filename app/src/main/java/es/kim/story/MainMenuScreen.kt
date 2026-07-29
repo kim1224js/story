@@ -46,6 +46,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -65,7 +66,7 @@ private enum class MainMenu(val label: String, val icon: String, val title: Stri
     Gamble("게임", "🎲", "미니게임", "게임 머니로 즐기는 카드와 승부 게임"),
     Items("아이템", "🎒", "아이템창", "장비와 보유 아이템을 확인하세요"),
     Story("스토리", "📖", "스토리", "나의 이야기를 진행해 보세요"),
-    Settings("설정", "⚙", "설정", "계정과 캐릭터를 관리하세요"),
+    Settings("설정", "⚙", "설정", "로컬 프로필과 캐릭터를 관리하세요"),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -170,7 +171,8 @@ fun MainMenuScreen(
                                 fontWeight = FontWeight.ExtraBold,
                                 color = Color(0xFF263238),
                                 textAlign = if (selected == MainMenu.Story) TextAlign.Center else TextAlign.Start,
-                                maxLines = 1,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }
@@ -258,7 +260,8 @@ private fun HeaderValue(label: String, value: String, modifier: Modifier, alignm
         Text(label, modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = alignment)
         Text(value, modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Bold, textAlign = alignment, maxLines = 1)
+            fontWeight = FontWeight.Bold, textAlign = alignment, maxLines = 1,
+            overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -309,6 +312,7 @@ private fun IdentityHeader(
                 },
                 fontWeight = FontWeight.ExtraBold,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.width(4.dp))
             Text(
@@ -333,14 +337,12 @@ private fun AnimatedMoneyHeader(
     val animatedMoney = remember { Animatable(money.toFloat()) }
     val pulseScale = remember { Animatable(1f) }
     var previousMoney by remember { mutableLongStateOf(money) }
-    var increasedBy by remember { mutableLongStateOf(0L) }
     var showIncrease by remember { mutableStateOf(false) }
 
     LaunchedEffect(money) {
         if (money == previousMoney) return@LaunchedEffect
         val difference = money - previousMoney
         previousMoney = money
-        increasedBy = difference
         showIncrease = difference > 0
         coroutineScope {
             launch { animatedMoney.animateTo(money.toFloat(), tween(durationMillis = 900)) }
@@ -353,15 +355,12 @@ private fun AnimatedMoneyHeader(
         showIncrease = false
     }
 
-    Column(modifier, horizontalAlignment = Alignment.End) {
-        Text(
-            "보유 재화",
-            modifier = Modifier.fillMaxWidth(),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.End,
-        )
-        Box(contentAlignment = Alignment.TopEnd) {
+    Column(
+        modifier,
+        horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Box(contentAlignment = Alignment.CenterEnd) {
             Text(
                 compactWon(animatedMoney.value.toDouble()),
                 modifier = Modifier.scale(pulseScale.value)
@@ -374,17 +373,9 @@ private fun AnimatedMoneyHeader(
                 fontWeight = FontWeight.ExtraBold,
                 color = if (showIncrease) Color(0xFFE65100) else MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            if (showIncrease) {
-                Text(
-                    "+${compactWon(increasedBy.toDouble())}",
-                    modifier = Modifier.offset(y = 22.dp),
-                    color = Color(0xFF2E7D32),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.ExtraBold,
-                )
-            }
-}
+        }
         Spacer(Modifier.height(3.dp))
         Surface(
             color = Color(0xFFE3F2FD),
@@ -417,12 +408,12 @@ private fun BottomMenuBar(selected: MainMenu, onSelected: (MainMenu) -> Unit) {
     val visibleMenus = MainMenu.entries.filterNot { it == MainMenu.Items }
     Surface(color = barColor, shadowElevation = 10.dp, tonalElevation = 0.dp) {
         Row(
-            Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 8.dp, vertical = 4.dp),
+            Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             visibleMenus.forEachIndexed { index, menu ->
                 Column(
-                    Modifier.weight(1f).fillMaxHeight().clickable { onSelected(menu) },
+                    Modifier.weight(1f).clickable { onSelected(menu) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
@@ -433,7 +424,8 @@ private fun BottomMenuBar(selected: MainMenu, onSelected: (MainMenu) -> Unit) {
                         ), contentAlignment = Alignment.Center,
                     ) { Text(menu.icon, style = MaterialTheme.typography.titleMedium) }
                     Text(menu.label, style = MaterialTheme.typography.labelSmall,
-                        fontWeight = if (selected == menu) FontWeight.Bold else FontWeight.Normal, maxLines = 1)
+                        fontWeight = if (selected == menu) FontWeight.Bold else FontWeight.Normal,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 if (index < visibleMenus.lastIndex) {
                     VerticalDivider(Modifier.height(34.dp), thickness = 1.dp, color = dividerColor)
@@ -556,10 +548,10 @@ private fun WorkView(
 
     LaunchedEffect(moleRunning) {
         if (!moleRunning) return@LaunchedEffect
-        repeat(120) { elapsed ->
-            moleSecondsLeft = 60 - (elapsed / 2)
-            moleTargets = (0 until 9).shuffled().take(2).toSet()
-            delay(500)
+        repeat(60) { elapsed ->
+            moleSecondsLeft = 60 - elapsed
+            moleTargets = (0 until 9).shuffled().take(3).toSet()
+            delay(1_000)
         }
         moleTargets = emptySet()
         moleHitEffects = emptySet()
@@ -607,7 +599,10 @@ private fun WorkView(
     }
 
     Page(backgroundRes = R.drawable.work_background, backgroundAlpha = 0.5f) {
-        PrimaryTabRow(selectedTabIndex = workTab) {
+        PrimaryScrollableTabRow(
+            selectedTabIndex = workTab,
+            edgePadding = 0.dp,
+        ) {
             Tab(
                 selected = workTab == 0,
                 onClick = { if (!moleRunning && moleCountdown == null) workTab = 0 },
@@ -616,7 +611,7 @@ private fun WorkView(
             Tab(
                 selected = workTab == 1,
                 onClick = { workTab = 1 },
-                text = { Text("름명보 잡기") },
+                text = { Text("두더지잡기") },
             )
             Tab(
                 selected = workTab == 2,
@@ -904,7 +899,7 @@ private fun WorkView(
             containerColor = Color(0xFFFFF8E7),
             title = {
                 Text(
-                    "름명보 잡기 결과",
+                    "두더지잡기 결과",
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Center,
                     fontWeight = FontWeight.ExtraBold,
@@ -1016,7 +1011,7 @@ private fun MoleGameView(
     LaunchedEffect(running, preparing) {
         if (running || preparing) {
             delay(80)
-            gameScrollState.animateScrollTo(gameScrollState.maxValue)
+            gameScrollState.animateScrollTo(0)
         }
     }
 
@@ -1036,13 +1031,13 @@ private fun MoleGameView(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                "름명보 잡기",
+                "두더지잡기",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.ExtraBold,
                 color = Color(0xFF4E342E),
             )
             Text(
-                "60초 동안 0.5초마다 2마리 · 오늘 $playsToday / 10회",
+                "60초 동안 1초마다 3마리 · 오늘 $playsToday / 10회",
                 color = Color(0xFF6D4C41),
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -1142,7 +1137,7 @@ private fun MoleGameView(
                                     if (hit) R.drawable.mole_character_hit
                                     else R.drawable.mole_character,
                                 ),
-                                contentDescription = "름명보",
+                                contentDescription = "두더지",
                                 modifier = Modifier.fillMaxSize().padding(4.dp).scale(characterScale),
                                 contentScale = ContentScale.Fit,
                             )
@@ -1844,26 +1839,11 @@ private fun MazeDirectionButton(icon: String, enabled: Boolean, onClick: () -> U
     }
 }
 
-private fun Long.won(): String = NumberFormat.getNumberInstance(Locale.KOREA).format(this) + "원"
+private fun Long.won(): String = formatGameCurrency(this)
 
-private fun compactWon(amount: Double): String {
-    val absolute = kotlin.math.abs(amount)
-    val (divisor, unit) = when {
-        absolute >= 10_000_000_000_000_000.0 -> 10_000_000_000_000_000.0 to "경원"
-        absolute >= 1_000_000_000_000.0 -> 1_000_000_000_000.0 to "조원"
-        absolute >= 100_000_000.0 -> 100_000_000.0 to "억원"
-        absolute >= 10_000_000.0 -> 10_000_000.0 to "천만원"
-        else -> return NumberFormat.getNumberInstance(Locale.KOREA).format(amount.roundToLong()) + "원"
-    }
-    return String.format(Locale.KOREA, "%.1f%s", amount / divisor, unit)
-}
+private fun compactWon(amount: Double): String = formatGameCurrency(amount)
 
-private fun betAmountLabel(amount: Long): String =
-    if (amount < 100_000_000L && amount % 10_000L == 0L) {
-        "${amount / 10_000L}만원"
-    } else {
-        compactWon(amount.toDouble())
-    }
+private fun betAmountLabel(amount: Long): String = formatGameCurrency(amount)
 
 private fun seotdaBetLabel(amount: Long, currency: SeotdaBetCurrency): String =
     if (currency == SeotdaBetCurrency.BlueChip) "💎 ${amount.formattedNumber()}개" else amount.won()
@@ -2398,6 +2378,14 @@ private fun GambleShopView(viewModel: MainViewModel) {
                         Text("💠 블루칩 바꾸기", color = Color.White, fontWeight = FontWeight.ExtraBold)
                         Text("게임 머니 ${exchangeCost.won()}으로 블루칩 1개를 바꿉니다.",
                             color = Color.White.copy(alpha = 0.75f))
+                        if (money < exchangeCost) {
+                            Text(
+                                "게임 머니가 부족합니다.",
+                                color = Color(0xFFFFCC80),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
                         Spacer(Modifier.height(10.dp))
                         Button(
                             onClick = {
@@ -2407,7 +2395,12 @@ private fun GambleShopView(viewModel: MainViewModel) {
                             },
                             modifier = Modifier.fillMaxWidth(),
                             enabled = money >= exchangeCost,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2)),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF1976D2),
+                                contentColor = Color.White,
+                                disabledContainerColor = Color(0xFF455A64),
+                                disabledContentColor = Color.White,
+                            ),
                         ) { Text("${exchangeCost.won()} → 블루칩 1개") }
                         HorizontalDivider(
                             modifier = Modifier.padding(vertical = 14.dp),
@@ -2418,9 +2411,17 @@ private fun GambleShopView(viewModel: MainViewModel) {
                             "블루칩 1개를 게임 머니 ${sellValue.won()}으로 되돌립니다.",
                             color = Color.White.copy(alpha = 0.75f),
                         )
+                        if (blueChips < 1L) {
+                            Text(
+                                "보유한 블루칩이 없습니다.",
+                                color = Color(0xFFFFCC80),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
                         if (money > MAX_PLAYER_MONEY - sellValue) {
                             Text(
-                                "보유 게임 머니가 500만원 이하일 때 바꿀 수 있어요.",
+                                "보유 게임 머니가 ${(MAX_PLAYER_MONEY - sellValue).won()} 이하일 때 바꿀 수 있어요.",
                                 color = Color(0xFFFFCC80),
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.Bold,
@@ -2435,7 +2436,12 @@ private fun GambleShopView(viewModel: MainViewModel) {
                             },
                             modifier = Modifier.fillMaxWidth(),
                             enabled = blueChips >= 1L && money <= MAX_PLAYER_MONEY - sellValue,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00838F)),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF00838F),
+                                contentColor = Color.White,
+                                disabledContainerColor = Color(0xFF455A64),
+                                disabledContentColor = Color.White,
+                            ),
                         ) { Text("블루칩 1개 → ${sellValue.won()}") }
                     }
                 }
@@ -2548,7 +2554,7 @@ private fun RpsGambleView(viewModel: MainViewModel, speakResult: (String) -> Uni
                     )
                 }
                 if (wager > money) {
-                    Text("보유 재화보다 많이 배팅할 수 없습니다.", color = Color(0xFFFF8A80),
+                    Text("보유한 게임 머니보다 많이 걸 수 없습니다.", color = Color(0xFFFF8A80),
                         style = MaterialTheme.typography.labelMedium)
                 }
                 Spacer(Modifier.height(22.dp))
@@ -2632,7 +2638,7 @@ private fun RpsGambleView(viewModel: MainViewModel, speakResult: (String) -> Uni
                         color = resultColor,
                     )
                     Spacer(Modifier.height(6.dp))
-                    Text("결과는 이미 보유 재화에 적용되었습니다.",
+                    Text("결과는 게임 머니에 이미 반영되었습니다.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -3671,73 +3677,279 @@ private fun SettingsView(
             contentDescription = null,
             modifier = Modifier.matchParentSize(),
             contentScale = ContentScale.Crop,
-            alpha = 0.5f,
+            alpha = 0.62f,
+        )
+        Box(
+            Modifier.matchParentSize().background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color(0x99FFF9ED),
+                        Color(0xCCF7F3E8),
+                        Color(0xE6FFFDF7),
+                    ),
+                ),
+            ),
         )
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp)) {
-                Text(
-                    "현재 계정",
-                    modifier = Modifier.padding(vertical = 3.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(userId, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(20.dp)); HorizontalDivider(); Spacer(Modifier.height(12.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xF2FFFDF7)),
+                border = BorderStroke(1.dp, Color(0x55896F47)),
+            ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().padding(18.dp),
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("배경 음악", fontWeight = FontWeight.Bold)
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = Color(0xFFE8F2D7),
+                        border = BorderStroke(1.dp, Color(0xFFB6C99A)),
+                    ) {
                         Text(
-                            if (bgmEnabled) "화면에 어울리는 음악을 재생합니다." else "배경 음악이 꺼져 있습니다.",
+                            "⚙",
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            style = MaterialTheme.typography.headlineMedium,
+                        )
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "설정",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF3E4D2D),
+                        )
+                        Text(
+                            "무릉도원에서의 여정을 내게 맞게 조정해요",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF6C725F),
+                        )
+                    }
+                }
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xF7FFFFFF)),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(18.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text("🌿", style = MaterialTheme.typography.headlineSmall)
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "현재 프로필",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color(0xFF6A7A54),
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            userId,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Black,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            "이 기기에 안전하게 저장되어 있어요",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Switch(checked = bgmEnabled, onCheckedChange = onBgmEnabledChange)
                 }
-                Text("음량 ${(bgmVolume * 100).roundToLong()}%", style = MaterialTheme.typography.labelMedium)
-                Slider(
-                    value = bgmVolume,
-                    onValueChange = onBgmVolumeChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = bgmEnabled,
-                    valueRange = 0f..1f,
-                )
-                HorizontalDivider(); Spacer(Modifier.height(12.dp))
-                OutlinedButton(
-                    onClick = { showCompletedStories = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = (user?.chapter ?: 1) > 1,
-                ) {
-                    Text(
-                        if ((user?.chapter ?: 1) > 1) "클리어한 스토리 다시보기"
-                        else "클리어한 스토리가 없습니다",
+            }
+
+            Text(
+                "소리",
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color(0xFF4E5E3E),
+            )
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xF7FFFFFF)),
+            ) {
+                Column(Modifier.fillMaxWidth().padding(18.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            if (bgmEnabled) "🎵" else "🔇",
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier.padding(end = 12.dp),
+                        )
+                        Column(Modifier.weight(1f)) {
+                            Text("배경 음악", fontWeight = FontWeight.ExtraBold)
+                            Text(
+                                if (bgmEnabled) "장면에 어울리는 음악이 재생 중이에요"
+                                else "배경 음악을 쉬게 하고 있어요",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = bgmEnabled, onCheckedChange = onBgmEnabledChange)
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "음량",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = if (bgmEnabled) Color(0xFFE8F2D7) else Color(0xFFF0F0F0),
+                        ) {
+                            Text(
+                                "${(bgmVolume * 100).roundToLong()}%",
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (bgmEnabled) Color(0xFF536B36)
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    Slider(
+                        value = bgmVolume,
+                        onValueChange = onBgmVolumeChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = bgmEnabled,
+                        valueRange = 0f..1f,
                     )
                 }
-                Spacer(Modifier.height(8.dp))
-                Button({ showAccounts = true }, Modifier.fillMaxWidth()) { Text("부캐로 이동") }
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = {
-                        seotdaName1 = user?.seotdaName1 ?: "졸린"
-                        seotdaName2 = user?.seotdaName2 ?: "토끼"
-                        seotdaName3 = user?.seotdaName3 ?: "콜라"
-                        showSeotdaNames = true
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("섯다 상대 이름 설정") }
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = { showPrivacyPolicy = true },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("개인정보 처리 안내") }
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(onLogout, Modifier.fillMaxWidth()) { Text("로그아웃") }
-            }}
+            }
+
+            Text(
+                "게임 관리",
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color(0xFF4E5E3E),
+            )
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xF7FFFFFF)),
+            ) {
+                Column(
+                    Modifier.fillMaxWidth().padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(9.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = { showCompletedStories = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = (user?.chapter ?: 1) > 1,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                    ) {
+                        Text(
+                            if ((user?.chapter ?: 1) > 1) "📖  클리어한 스토리 다시보기"
+                            else "📖  아직 클리어한 스토리가 없어요",
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Start,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            seotdaName1 = user?.seotdaName1 ?: "졸린"
+                            seotdaName2 = user?.seotdaName2 ?: "토끼"
+                            seotdaName3 = user?.seotdaName3 ?: "콜라"
+                            showSeotdaNames = true
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                    ) {
+                        Text(
+                            "🎴  섯다 상대 이름 설정",
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Start,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+            }
+
+            Text(
+                "계정 및 정보",
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color(0xFF4E5E3E),
+            )
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xF7FFFFFF)),
+            ) {
+                Column(
+                    Modifier.fillMaxWidth().padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(9.dp),
+                ) {
+                    Button(
+                        onClick = { showAccounts = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                    ) {
+                        Text(
+                            "👥  다른 프로필로 이동",
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Start,
+                            fontWeight = FontWeight.ExtraBold,
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = { showPrivacyPolicy = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                    ) {
+                        Text(
+                            "🔒  개인정보 처리 안내",
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Start,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = onLogout,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error,
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.55f)),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                    ) {
+                        Text(
+                            "↪  로그아웃",
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Start,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+            }
+            Text(
+                "모든 설정은 현재 기기에 저장됩니다.",
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.labelSmall,
+                color = Color(0xFF74786D),
+            )
         }
     }
 
@@ -3859,7 +4071,7 @@ private fun SettingsView(
             containerColor = Color(0xFFFFFCFF),
             title = {
                 Text(
-                    "계정 변경",
+                    "로컬 프로필 변경",
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Center,
                     fontWeight = FontWeight.ExtraBold,
@@ -3894,7 +4106,7 @@ private fun SettingsView(
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text("계정", modifier = Modifier.fillMaxWidth(),
+                                        Text("프로필", modifier = Modifier.fillMaxWidth(),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             textAlign = TextAlign.Center)
@@ -3909,14 +4121,28 @@ private fun SettingsView(
                                         Text("${account.chapter}", modifier = Modifier.fillMaxWidth(),
                                             fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                                     }
-                                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text("보유재화", modifier = Modifier.fillMaxWidth(),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            textAlign = TextAlign.Center)
-                                        Text(account.money.won(), modifier = Modifier.fillMaxWidth(),
-                                            fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
-                                            maxLines = 1)
+                                    Column(
+                                        Modifier.weight(1f),
+                                        horizontalAlignment = Alignment.End,
+                                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                                    ) {
+                                        Text(
+                                            account.money.won(),
+                                            modifier = Modifier.fillMaxWidth(),
+                                            fontWeight = FontWeight.Bold,
+                                            textAlign = TextAlign.End,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            "🔷 ${account.blueChips.formattedNumber()}",
+                                            modifier = Modifier.fillMaxWidth(),
+                                            color = Color(0xFF0277BD),
+                                            fontWeight = FontWeight.Bold,
+                                            textAlign = TextAlign.End,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
                                     }
                                 }
                                 if (account.userId != userId) {
@@ -3946,7 +4172,7 @@ private fun SettingsView(
             title = { Text("섯다 상대 이름 설정") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("이름은 현재 계정에만 저장됩니다.", style = MaterialTheme.typography.bodySmall)
+                    Text("이름은 현재 로컬 프로필에만 저장됩니다.", style = MaterialTheme.typography.bodySmall)
                     listOf(
                         seotdaName1 to { value: String -> seotdaName1 = value },
                         seotdaName2 to { value: String -> seotdaName2 = value },
@@ -4024,7 +4250,7 @@ private fun SettingsView(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        "현재 계정: $userId\n변경할 컬럼을 눌러 선택하세요.",
+                        "현재 로컬 프로필: $userId\n변경할 항목을 눌러 선택하세요.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

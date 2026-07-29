@@ -12,6 +12,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -42,6 +44,8 @@ import java.util.Locale
 private const val PUZZLE_SIZE = 8
 private const val PUZZLE_TYPES = 6
 
+private enum class PuzzlePhase { Waiting, Countdown, Playing, Finished }
+
 @Composable
 fun PuzzleGameView(
     modifier: Modifier = Modifier,
@@ -54,6 +58,8 @@ fun PuzzleGameView(
     var score by remember { mutableIntStateOf(0) }
     var secondsLeft by remember { mutableIntStateOf(30) }
     var gameRound by remember { mutableIntStateOf(0) }
+    var countdown by remember { mutableIntStateOf(3) }
+    var gamePhase by remember { mutableStateOf(PuzzlePhase.Waiting) }
     var timeExpired by remember { mutableStateOf(false) }
     var rewardClaimed by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<PuzzleResult?>(null) }
@@ -67,6 +73,7 @@ fun PuzzleGameView(
     var tts by remember { mutableStateOf<TextToSpeech?>(null) }
     var ttsReady by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val puzzleScrollState = rememberScrollState()
     val tones = remember { ToneGenerator(AudioManager.STREAM_MUSIC, 88) }
 
     DisposableEffect(tones) { onDispose { tones.release() } }
@@ -89,13 +96,27 @@ fun PuzzleGameView(
     }
 
     LaunchedEffect(gameRound) {
+        if (gameRound == 0) return@LaunchedEffect
+        puzzleScrollState.animateScrollTo(0)
         secondsLeft = 30
+        countdown = 3
+        gamePhase = PuzzlePhase.Countdown
         timeExpired = false
         rewardClaimed = false
+        comboMessage = "잠시 후 퍼즐이 시작됩니다"
+        while (countdown > 0) {
+            tones.startTone(ToneGenerator.TONE_PROP_BEEP, 120)
+            delay(1_000)
+            countdown -= 1
+        }
+        gamePhase = PuzzlePhase.Playing
+        comboMessage = "인접한 블록 두 개를 눌러 바꿔보세요"
+        tones.startTone(ToneGenerator.TONE_PROP_ACK, 180)
         while (secondsLeft > 0) {
             delay(1_000)
             secondsLeft -= 1
         }
+        gamePhase = PuzzlePhase.Finished
         timeExpired = true
         selected = null
         comboMessage = "시간 종료! 연쇄 처리가 끝나면 보상이 지급돼요"
@@ -124,18 +145,17 @@ fun PuzzleGameView(
         }
     }
 
-    fun restart() {
+    fun startRound() {
         if (inputLocked) return
         result = null
         board = createPuzzleBoard()
         selected = null
         score = 0
         gameRound += 1
-        comboMessage = "인접한 블록 두 개를 눌러 바꿔보세요"
     }
 
     fun selectTile(index: Int) {
-        if (timeExpired || inputLocked) return
+        if (gamePhase != PuzzlePhase.Playing || inputLocked) return
         val first = selected
         if (first == null) {
             selected = index
@@ -208,7 +228,12 @@ fun PuzzleGameView(
     }
 
     Column(
-        modifier = modifier.padding(horizontal = 4.dp).fillMaxSize(),
+        modifier = modifier.fillMaxSize()
+            .verticalScroll(
+                state = puzzleScrollState,
+                enabled = gamePhase == PuzzlePhase.Waiting || gamePhase == PuzzlePhase.Finished,
+            )
+            .padding(horizontal = 4.dp, vertical = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Card(
@@ -218,9 +243,6 @@ fun PuzzleGameView(
             border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFFFFB74D)),
         ) {
             Column(Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("꿈빛 과일 퍼즐", style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.ExtraBold, color = Color(0xFF8D4A00))
-                Spacer(Modifier.height(6.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     Text("점수 $score", fontWeight = FontWeight.Bold)
                     Text("남은 시간 ${secondsLeft}초", fontWeight = FontWeight.Bold,
@@ -267,6 +289,30 @@ fun PuzzleGameView(
                             }
                         }
                     }
+                    if (gamePhase != PuzzlePhase.Playing) {
+                        Box(
+                            Modifier.matchParentSize()
+                                .background(Color(0xCCFFF8E8), RoundedCornerShape(13.dp)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                when (gamePhase) {
+                                    PuzzlePhase.Waiting -> "시작 버튼을 눌러주세요"
+                                    PuzzlePhase.Countdown -> countdown.coerceAtLeast(1).toString()
+                                    PuzzlePhase.Finished -> "게임 종료"
+                                    PuzzlePhase.Playing -> ""
+                                },
+                                style = if (gamePhase == PuzzlePhase.Countdown) {
+                                    MaterialTheme.typography.displayLarge
+                                } else {
+                                    MaterialTheme.typography.titleLarge
+                                },
+                                fontWeight = FontWeight.Black,
+                                color = Color(0xFF8D4A00),
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
                 }
                 Spacer(Modifier.height(12.dp))
                 if (timeExpired && rewardClaimed) {
@@ -274,8 +320,20 @@ fun PuzzleGameView(
                         fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.height(8.dp))
                 }
-                OutlinedButton(onClick = ::restart, enabled = !inputLocked, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (timeExpired) "30초 다시 시작" else "새 게임")
+                OutlinedButton(
+                    onClick = ::startRound,
+                    enabled = !inputLocked &&
+                        (gamePhase == PuzzlePhase.Waiting || gamePhase == PuzzlePhase.Finished),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        when (gamePhase) {
+                            PuzzlePhase.Waiting -> "퍼즐 시작"
+                            PuzzlePhase.Countdown -> "${countdown.coerceAtLeast(1)}초 후 시작"
+                            PuzzlePhase.Playing -> "게임 진행 중"
+                            PuzzlePhase.Finished -> "30초 다시 시작"
+                        },
+                    )
                 }
             }
         }
@@ -304,7 +362,7 @@ fun PuzzleGameView(
                         fontWeight = FontWeight.ExtraBold)
                 }
             },
-            confirmButton = { Button(onClick = ::restart) { Text("다시 도전") } },
+            confirmButton = { Button(onClick = ::startRound) { Text("다시 도전") } },
             dismissButton = { TextButton(onClick = { result = null }) { Text("닫기") } },
         )
     }
@@ -458,4 +516,4 @@ internal fun calculatePuzzleReward(score: Int, clearReward: Long): Long {
 }
 
 private fun formatPuzzleWon(value: Long): String =
-    String.format(java.util.Locale.KOREA, "%,d원", value)
+    formatGameCurrency(value)
