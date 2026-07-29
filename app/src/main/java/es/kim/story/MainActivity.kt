@@ -65,6 +65,7 @@ private enum class Screen { Splash, Login, Home, Switching }
     var switchingDestination by remember { mutableStateOf(Screen.Home) }
     var minimumSplashElapsed by remember { mutableStateOf(false) }
     var permissionsReady by remember { mutableStateOf(false) }
+    var showHealthDisclosure by remember { mutableStateOf(false) }
     val permissions = remember { setOf(HealthPermission.getReadPermission(StepsRecord::class)) }
     val launcher = rememberLauncherForActivityResult(PermissionController.createRequestPermissionResultContract()) {
         permissionsReady = true
@@ -72,7 +73,7 @@ private enum class Screen { Splash, Login, Home, Switching }
     LaunchedEffect(Unit) {
         if (HealthConnectClient.getSdkStatus(context) == HealthConnectClient.SDK_AVAILABLE) {
             val granted = HealthConnectClient.getOrCreate(context).permissionController.getGrantedPermissions()
-            if (granted.containsAll(permissions)) permissionsReady = true else launcher.launch(permissions)
+            if (granted.containsAll(permissions)) permissionsReady = true else showHealthDisclosure = true
         } else permissionsReady = true
     }
     LaunchedEffect(Unit) {
@@ -139,6 +140,27 @@ private enum class Screen { Splash, Login, Home, Switching }
             Screen.Switching -> SwitchingScreen()
         }
     }}
+    if (showHealthDisclosure) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("걸음 수 권한 안내") },
+            text = {
+                Text("걸음 퀘스트의 달성 여부와 보상을 계산하기 위해 Health Connect의 걸음 수를 읽습니다. 걸음 수는 기기 안에서만 처리하며 외부 서버로 전송하거나 다른 사람에게 제공하지 않습니다. 권한을 허용하지 않아도 걸음 퀘스트를 제외한 기능은 이용할 수 있습니다.")
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showHealthDisclosure = false
+                    launcher.launch(permissions)
+                }) { Text("권한 설정") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showHealthDisclosure = false
+                    permissionsReady = true
+                }) { Text("나중에") }
+            },
+        )
+    }
 }
 
 @Composable

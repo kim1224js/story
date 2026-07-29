@@ -106,7 +106,7 @@ fun PuzzleGameView(
         if (timeExpired && !inputLocked && !rewardClaimed) {
             rewardClaimed = true
             val previousBest = bestScore
-            val earnedMoney = puzzleReward(score, clearReward)
+            val earnedMoney = calculatePuzzleReward(score, clearReward)
             val isNewBest = score > previousBest
             result = PuzzleResult(score, earnedMoney, previousBest, isNewBest)
             onReward(score)
@@ -226,7 +226,7 @@ fun PuzzleGameView(
                     Text("남은 시간 ${secondsLeft}초", fontWeight = FontWeight.Bold,
                         color = if (secondsLeft <= 5) Color(0xFFC62828) else Color.Unspecified)
                 }
-                Text("1점당 ${formatPuzzleWon((clearReward / 1_000L).coerceAtLeast(0L))}",
+                Text("1점당 ${formatPuzzleWon(stageCostPercentReward(clearReward, 0.02))} · 최대 ${formatPuzzleWon(stageCostPercentReward(clearReward, 10.0))}",
                     style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32),
                     fontWeight = FontWeight.Bold)
                 Text(comboMessage, style = MaterialTheme.typography.bodySmall,
@@ -448,8 +448,14 @@ private fun collapsePuzzleMatches(board: List<Int>, matches: Set<Int>): MutableL
     return collapsed
 }
 
-private fun puzzleReward(score: Int, clearReward: Long): Long =
-    runCatching { Math.multiplyExact(score.toLong(), clearReward / 1_000L) }.getOrDefault(0L)
+internal fun calculatePuzzleReward(score: Int, clearReward: Long): Long {
+    if (score <= 0 || clearReward <= 0L) return 0L
+    val rewardPerPoint = stageCostPercentReward(clearReward, 0.02)
+    val maximumReward = stageCostPercentReward(clearReward, 10.0)
+    return runCatching { Math.multiplyExact(score.toLong(), rewardPerPoint) }
+        .getOrDefault(maximumReward)
+        .coerceAtMost(maximumReward)
+}
 
 private fun formatPuzzleWon(value: Long): String =
     String.format(java.util.Locale.KOREA, "%,d원", value)

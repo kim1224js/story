@@ -1433,13 +1433,11 @@ fun stageClearCost(chapter: Int): Long =
     storyChapters.getOrNull((chapter - 1).coerceIn(0, storyChapters.lastIndex))?.clearCost
         ?: storyChapters.last().clearCost
 
-fun chapterRewardMultiplier(chapter: Int): Double =
-    stageClearCost(chapter) / 1_000_000.0
+fun stagePercentReward(chapter: Int, percent: Double): Long =
+    stageCostPercentReward(stageClearCost(chapter), percent)
 
-fun scaledChapterReward(baseReward: Long, chapter: Int): Long =
-    (baseReward.toDouble() * chapterRewardMultiplier(chapter))
-        .coerceAtMost(Long.MAX_VALUE.toDouble())
-        .roundToLong()
+fun stageCostPercentReward(stageCost: Long, percent: Double): Long =
+    (stageCost.toDouble() * percent / 100.0).roundToLong().coerceAtLeast(1L)
 
 fun rewardMultiplierLabel(multiplier: Double): String =
     if (multiplier % 1.0 == 0.0) {

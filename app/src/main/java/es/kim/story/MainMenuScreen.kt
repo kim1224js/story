@@ -62,7 +62,7 @@ import java.util.Random as JavaRandom
 private enum class MainMenu(val label: String, val icon: String, val title: String, val description: String) {
     Work("알바", "💼", "알바", "한 번에 한 개의 알바만 진행할 수 있어요"),
     Settlement("런닝", "👟", "런닝하기", "걸음 수를 채우고 보상을 받는 공간이에요"),
-    Gamble("도박", "🎲", "☆★도박", "인생 한방★☆"),
+    Gamble("게임", "🎲", "미니게임", "게임 머니로 즐기는 카드와 승부 게임"),
     Items("아이템", "🎒", "아이템창", "장비와 보유 아이템을 확인하세요"),
     Story("스토리", "📖", "스토리", "나의 이야기를 진행해 보세요"),
     Settings("설정", "⚙", "설정", "계정과 캐릭터를 관리하세요"),
@@ -123,10 +123,12 @@ fun MainMenuScreen(
                                 )
                             }
                             NotebookHeaderCard(
-                                modifier = Modifier.weight(1f).clickable {
-                                    openDbEditorRequested = true
-                                    selected = MainMenu.Settings
-                                },
+                                modifier = Modifier.weight(1f).then(
+                                    if (BuildConfig.DEBUG) Modifier.clickable {
+                                        openDbEditorRequested = true
+                                        selected = MainMenu.Settings
+                                    } else Modifier
+                                ),
                                 containerColor = Color(0xFFFCE4EC),
                                 accentColor = Color(0xFFD81B60),
                             ) {
@@ -147,7 +149,11 @@ fun MainMenuScreen(
                                 containerColor = Color(0xFFFFF3CD),
                                 accentColor = Color(0xFFF9A825),
                             ) {
-                                AnimatedMoneyHeader(user?.money ?: 0L, Modifier.fillMaxWidth())
+                                AnimatedMoneyHeader(
+                                    money = user?.money ?: 0L,
+                                    blueChips = user?.blueChips ?: 0L,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
                             }
                         }
                         Spacer(Modifier.height(8.dp))
@@ -274,7 +280,7 @@ private fun IdentityHeader(
                     shadowElevation = 2.dp,
                 ) {
                     Text(
-                        "♠ 도박의 신 ♠",
+                        "♠ 게임 마스터 ♠",
                         modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
                         color = Color(0xFFFFD54F),
                         style = MaterialTheme.typography.labelSmall,
@@ -319,7 +325,11 @@ private fun IdentityHeader(
 }
 
 @Composable
-private fun AnimatedMoneyHeader(money: Long, modifier: Modifier = Modifier) {
+private fun AnimatedMoneyHeader(
+    money: Long,
+    blueChips: Long,
+    modifier: Modifier = Modifier,
+) {
     val animatedMoney = remember { Animatable(money.toFloat()) }
     val pulseScale = remember { Animatable(1f) }
     var previousMoney by remember { mutableLongStateOf(money) }
@@ -372,6 +382,27 @@ private fun AnimatedMoneyHeader(money: Long, modifier: Modifier = Modifier) {
                     color = Color(0xFF2E7D32),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.ExtraBold,
+                )
+            }
+}
+        Spacer(Modifier.height(3.dp))
+        Surface(
+            color = Color(0xFFE3F2FD),
+            shape = RoundedCornerShape(8.dp),
+            border = BorderStroke(1.dp, Color(0xFF64B5F6)),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text("🔷", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    blueChips.formattedNumber(),
+                    color = Color(0xFF0277BD),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
                 )
             }
         }
@@ -442,9 +473,10 @@ private fun WorkView(
     val context = LocalContext.current
     val state by viewModel.workState.collectAsState()
     val user by viewModel.user.collectAsState()
-    val rewardMultiplier = chapterRewardMultiplier(user?.chapter ?: 1)
-    val currentClearCost = stageClearCost(user?.chapter ?: 1)
-    val moleRewardPerHit = (currentClearCost / 1_000L).coerceAtLeast(1L)
+    val currentChapter = user?.chapter ?: 1
+    val currentClearCost = stageClearCost(currentChapter)
+    val moleRewardPerHit = stageCostPercentReward(currentClearCost, 0.02)
+    val mazeReward = stageCostPercentReward(currentClearCost, 100.0)
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var cancelDialog by remember { mutableStateOf(false) }
     var claimDialogJob by remember { mutableStateOf<PartTimeJob?>(null) }
@@ -465,7 +497,7 @@ private fun WorkView(
     var iceGameResult by remember { mutableStateOf<String?>(null) }
     var icePenguinFound by remember { mutableStateOf(false) }
     var mazeResult by remember { mutableStateOf<String?>(null) }
-    val icePenguinReward = (currentClearCost / 20L).coerceAtLeast(1L)
+    val icePenguinReward = stageCostPercentReward(currentClearCost, 6.0)
     val iceToneGenerator = remember { ToneGenerator(AudioManager.STREAM_MUSIC, 85) }
     val mazeToneGenerator = remember { ToneGenerator(AudioManager.STREAM_MUSIC, 72) }
     val iceSoundPool = remember { SoundPool.Builder().setMaxStreams(3).build() }
@@ -611,7 +643,7 @@ private fun WorkView(
                     partTimeJobs.filter { it.id == active.jobId }
                 } ?: partTimeJobs
                 visibleJobs.forEach { job ->
-                    val scaledReward = scaledChapterReward(job.reward, user?.chapter ?: 1)
+                    val scaledReward = stagePercentReward(currentChapter, job.rewardPercent)
                     val active = state.activeJob
                     val isActive = active?.jobId == job.id
                     val finishAt = (active?.startedAt ?: now) + job.durationMillis
@@ -648,7 +680,7 @@ private fun WorkView(
                                 Text(job.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                 Text(
                                     "${job.durationLabel} · ${compactWon(scaledReward.toDouble())} " +
-                                        "(×${rewardMultiplierLabel(rewardMultiplier)})",
+                                        "(${rewardMultiplierLabel(job.rewardPercent)}%)",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                                 Spacer(Modifier.height(12.dp))
@@ -788,16 +820,16 @@ private fun WorkView(
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 state = state,
                 money = user?.money ?: 0L,
-                reward = currentClearCost,
+                reward = mazeReward,
                 onMove = { dx, dy, itemId ->
                     val targetX = state.mazeX + dx
                     val targetY = state.mazeY + dy
                     if (viewModel.moveMaze(targetX, targetY, itemId)) {
                         mazeToneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 65)
                         if (targetY * MAZE_SIZE + targetX in mazeExitCells(state.mazeSeed)) {
-                            viewModel.completeMaze(currentClearCost)
+                            viewModel.completeMaze(mazeReward)
                             mazeToneGenerator.startTone(ToneGenerator.TONE_PROP_ACK, 650)
-                            mazeResult = "미로 탈출 성공!\n${currentClearCost.won()} 획득"
+                            mazeResult = "미로 탈출 성공!\n${mazeReward.won()} 획득"
                         }
                     }
                 },
@@ -952,7 +984,7 @@ private fun WorkView(
             text = {
                 Text(
                     "${job.title}을 완료했습니다.\n" +
-                        "${compactWon(scaledChapterReward(job.reward, user?.chapter ?: 1).toDouble())}을 받을까요?",
+                        "${compactWon(stagePercentReward(user?.chapter ?: 1, job.rewardPercent).toDouble())}을 받을까요?",
                 )
             },
             confirmButton = {
@@ -1571,11 +1603,12 @@ private fun MazeGameView(
                 )
                 Spacer(Modifier.height(10.dp))
 
-                Column(
-                    Modifier.fillMaxWidth().aspectRatio(1f)
+                Box(
+                    Modifier.fillMaxWidth().aspectRatio(1.18f)
                         .clip(RoundedCornerShape(18.dp))
                         .border(3.dp, Color(0xFF5D4037), RoundedCornerShape(18.dp)),
                 ) {
+                    Column(Modifier.matchParentSize()) {
                     repeat(4) { visibleRow ->
                         Row(Modifier.weight(1f).fillMaxWidth()) {
                             repeat(4) { visibleColumn ->
@@ -1588,7 +1621,7 @@ private fun MazeGameView(
                                 val isOuterLine = visibleRow == 0 || visibleRow == 3 ||
                                     visibleColumn == 0 || visibleColumn == 3
                                 val isVisited = cellIndex in state.mazeVisitedCells
-                                val isVisible = inMap && (!isOuterLine || isVisited)
+                                val isVisible = inMap
                                 val isGoal = cellIndex in maze.exitCells
                                 val hasItem = cellIndex in maze.itemCells &&
                                     cellIndex !in state.mazeCollectedItems
@@ -1657,9 +1690,10 @@ private fun MazeGameView(
                                             )
                                         }
                                         if (!isPlayer) {
+                                            val fogAlpha = if (isOuterLine && !isVisited) 0.52f else 0.20f
                                             Box(
                                                 Modifier.matchParentSize().background(
-                                                    Color(0xFF37474F).copy(alpha = 0.20f),
+                                                    Color(0xFF17252B).copy(alpha = fogAlpha),
                                                 ),
                                             )
                                         }
@@ -1668,6 +1702,12 @@ private fun MazeGameView(
                             }
                         }
                     }
+                }
+                    MazeMiniMap(
+                        currentCell = currentCell,
+                        visitedCells = state.mazeVisitedCells,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(9.dp).size(112.dp),
+                    )
                 }
                 Spacer(Modifier.height(12.dp))
 
@@ -1740,6 +1780,57 @@ private fun MazeGameView(
 }
 
 @Composable
+private fun MazeMiniMap(
+    currentCell: Int,
+    visitedCells: Set<Int>,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xE61B252B))
+            .border(1.5.dp, Color.White.copy(alpha = 0.9f), RoundedCornerShape(10.dp))
+            .padding(5.dp),
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val cellWidth = size.width / MAZE_SIZE
+            val cellHeight = size.height / MAZE_SIZE
+
+            visitedCells.forEach { cell ->
+                if (cell in 0 until MAZE_SIZE * MAZE_SIZE) {
+                    val x = cell % MAZE_SIZE
+                    val y = cell / MAZE_SIZE
+                    drawRect(
+                        color = Color(0xFF4DD0E1),
+                        topLeft = Offset(x * cellWidth, y * cellHeight),
+                        size = Size(cellWidth, cellHeight),
+                    )
+                }
+            }
+
+            val playerX = currentCell % MAZE_SIZE
+            val playerY = currentCell / MAZE_SIZE
+            drawCircle(
+                color = Color(0xFFFF5252),
+                radius = cellWidth * 1.55f,
+                center = Offset(
+                    (playerX + 0.5f) * cellWidth,
+                    (playerY + 0.5f) * cellHeight,
+                ),
+            )
+            drawCircle(
+                color = Color.White,
+                radius = cellWidth * 0.55f,
+                center = Offset(
+                    (playerX + 0.5f) * cellWidth,
+                    (playerY + 0.5f) * cellHeight,
+                ),
+            )
+        }
+    }
+}
+
+@Composable
 private fun MazeDirectionButton(icon: String, enabled: Boolean, onClick: () -> Unit) {
     Button(
         onClick = onClick,
@@ -1791,7 +1882,7 @@ private fun SettlementView(viewModel: MainViewModel) {
     val context = LocalContext.current
     val state by viewModel.stepQuestState.collectAsState()
     val user by viewModel.user.collectAsState()
-    val rewardMultiplier = chapterRewardMultiplier(user?.chapter ?: 1)
+    val currentChapter = user?.chapter ?: 1
     var settlementQuest by remember { mutableStateOf<StepQuest?>(null) }
     var showMoreMap by remember { mutableStateOf(false) }
     var moreRewardApplied by remember { mutableStateOf(false) }
@@ -1811,7 +1902,7 @@ private fun SettlementView(viewModel: MainViewModel) {
             )
             Spacer(Modifier.height(10.dp))
             stepQuests.filter { it.period == QuestPeriod.Daily }.forEach { quest ->
-                StepQuestCard(quest, state.dailySteps, state, rewardMultiplier) {
+                StepQuestCard(quest, state.dailySteps, state, stagePercentReward(currentChapter, quest.rewardPercent)) {
                     moreRewardApplied = false
                     settlementQuest = quest
                 }
@@ -1825,7 +1916,7 @@ private fun SettlementView(viewModel: MainViewModel) {
             )
             Spacer(Modifier.height(10.dp))
             stepQuests.filter { it.period == QuestPeriod.Weekly }.forEach { quest ->
-                StepQuestCard(quest, state.weeklySteps, state, rewardMultiplier) {
+                StepQuestCard(quest, state.weeklySteps, state, stagePercentReward(currentChapter, quest.rewardPercent)) {
                     moreRewardApplied = false
                     settlementQuest = quest
                 }
@@ -1834,7 +1925,7 @@ private fun SettlementView(viewModel: MainViewModel) {
     }
 
     settlementQuest?.let { quest ->
-        val chapterReward = scaledChapterReward(quest.reward, user?.chapter ?: 1)
+        val chapterReward = stagePercentReward(user?.chapter ?: 1, quest.rewardPercent)
         val settlementReward = if (moreRewardApplied) chapterReward + chapterReward / 2 else chapterReward
         Dialog(onDismissRequest = { settlementQuest = null }) {
             Card(
@@ -1938,7 +2029,7 @@ private fun StepQuestCard(
     quest: StepQuest,
     steps: Long,
     state: StepQuestState,
-    rewardMultiplier: Double,
+    rewardAmount: Long,
     onClaim: () -> Unit,
 ) {
     val today = LocalDate.now()
@@ -1973,8 +2064,8 @@ private fun StepQuestCard(
                     )
                     Spacer(Modifier.weight(1f))
                     Text(
-                        "${compactWon((quest.reward.toDouble() * rewardMultiplier))} · " +
-                            "×${rewardMultiplierLabel(rewardMultiplier)}",
+                        "${compactWon(rewardAmount.toDouble())} · " +
+                            "${rewardMultiplierLabel(quest.rewardPercent)}%",
                         color = Color(0xFFFF8F00),
                         fontWeight = FontWeight.ExtraBold,
                     )
@@ -2105,7 +2196,7 @@ private fun ItemsView(viewModel: MainViewModel) {
                 }
                 HorizontalDivider(color = Color(0xFFD1C4E9))
                 Spacer(Modifier.height(7.dp))
-                BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+                Box(Modifier.fillMaxWidth().weight(1f)) {
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(6),
                         modifier = Modifier.fillMaxSize(),
@@ -2185,7 +2276,7 @@ private fun GambleView(viewModel: MainViewModel) {
     val context = LocalContext.current
     val pagerState = rememberPagerState(pageCount = { 4 })
     val scope = rememberCoroutineScope()
-    val gameLabels = listOf("가위바위보", "1대1 섯다", "3장 섯다", "상점")
+    val gameLabels = listOf("가위바위보", "1대1 카드", "3장 카드", "교환소")
     var gambleTts by remember { mutableStateOf<TextToSpeech?>(null) }
     var gambleTtsReady by remember { mutableStateOf(false) }
 
@@ -2261,6 +2352,7 @@ private fun GambleShopView(viewModel: MainViewModel) {
     val blueChips = user?.blueChips ?: 0L
     val premiumOwned = user?.premiumIdColor == true
     val exchangeCost = es.kim.story.data.UserRepository.BLUE_CHIP_EXCHANGE_COST
+    val sellValue = es.kim.story.data.UserRepository.BLUE_CHIP_SELL_VALUE
     val shopSoundPool = remember { SoundPool.Builder().setMaxStreams(2).build() }
     val exchangeSound = remember(shopSoundPool) {
         shopSoundPool.load(context, R.raw.sfx_blue_chip_exchange, 1)
@@ -2283,10 +2375,16 @@ private fun GambleShopView(viewModel: MainViewModel) {
                 Modifier.fillMaxWidth().padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text("💎 도박 상점", color = Color(0xFF80D8FF),
+                Text("💎 게임 교환소", color = Color(0xFF80D8FF),
                     style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
+                Text(
+                    "게임 머니와 블루칩은 현금 가치가 없으며 현금으로 교환할 수 없습니다.",
+                    color = Color.White.copy(alpha = 0.78f),
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                )
                 Spacer(Modifier.height(8.dp))
-                Text("보유 재화 ${money.won()}", color = Color.White)
+                Text("보유 게임 머니 ${money.won()}", color = Color.White)
                 Text("보유 블루칩 ${blueChips.formattedNumber()}개",
                     color = Color(0xFF82B1FF), fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.height(18.dp))
@@ -2297,8 +2395,8 @@ private fun GambleShopView(viewModel: MainViewModel) {
                     shape = RoundedCornerShape(16.dp),
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("💠 블루칩 교환", color = Color.White, fontWeight = FontWeight.ExtraBold)
-                        Text("1000조원으로 블루칩 1개를 교환합니다.",
+                        Text("💠 블루칩 바꾸기", color = Color.White, fontWeight = FontWeight.ExtraBold)
+                        Text("게임 머니 ${exchangeCost.won()}으로 블루칩 1개를 바꿉니다.",
                             color = Color.White.copy(alpha = 0.75f))
                         Spacer(Modifier.height(10.dp))
                         Button(
@@ -2310,7 +2408,35 @@ private fun GambleShopView(viewModel: MainViewModel) {
                             modifier = Modifier.fillMaxWidth(),
                             enabled = money >= exchangeCost,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2)),
-                        ) { Text("1000조원 → 블루칩 1개") }
+                        ) { Text("${exchangeCost.won()} → 블루칩 1개") }
+                        HorizontalDivider(
+                            modifier = Modifier.padding(vertical = 14.dp),
+                            color = Color.White.copy(alpha = 0.18f),
+                        )
+                        Text("🔷 블루칩 되돌리기", color = Color.White, fontWeight = FontWeight.ExtraBold)
+                        Text(
+                            "블루칩 1개를 게임 머니 ${sellValue.won()}으로 되돌립니다.",
+                            color = Color.White.copy(alpha = 0.75f),
+                        )
+                        if (money > MAX_PLAYER_MONEY - sellValue) {
+                            Text(
+                                "보유 게임 머니가 500만원 이하일 때 바꿀 수 있어요.",
+                                color = Color(0xFFFFCC80),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Button(
+                            onClick = {
+                                viewModel.sellBlueChip {
+                                    shopSoundPool.play(exchangeSound, 1f, 1f, 1, 0, 0.92f)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = blueChips >= 1L && money <= MAX_PLAYER_MONEY - sellValue,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00838F)),
+                        ) { Text("블루칩 1개 → ${sellValue.won()}") }
                     }
                 }
                 Spacer(Modifier.height(14.dp))
@@ -2320,9 +2446,9 @@ private fun GambleShopView(viewModel: MainViewModel) {
                     shape = RoundedCornerShape(16.dp),
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("✨ 프리미엄 아이디 · 도박의 신", color = Color(0xFFFFD54F),
+                        Text("✨ 프리미엄 아이디 · 게임 마스터", color = Color(0xFFFFD54F),
                             fontWeight = FontWeight.ExtraBold)
-                        Text("아이디를 프리미엄 골드 색상으로 바꾸고 전용 '도박의 신' 배지를 영구 적용합니다.",
+                        Text("아이디를 프리미엄 골드 색상으로 바꾸고 전용 '게임 마스터' 배지를 영구 적용합니다.",
                             color = Color.White.copy(alpha = 0.75f))
                         Spacer(Modifier.height(10.dp))
                         Button(
@@ -2387,7 +2513,7 @@ private fun RpsGambleView(viewModel: MainViewModel, speakResult: (String) -> Uni
                     fontWeight = FontWeight.Bold,
                 )
                 Spacer(Modifier.height(20.dp))
-                Text("보유 재화 ${money.won()}", color = Color(0xFFB9F6CA), fontWeight = FontWeight.Bold)
+                Text("보유 게임 머니 ${money.won()}", color = Color(0xFFB9F6CA), fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(10.dp))
                 Text("배팅 금액 선택", color = Color.White, fontWeight = FontWeight.Bold)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -2530,7 +2656,7 @@ private fun SeotdaView(viewModel: MainViewModel, speakResult: (String) -> Unit) 
     val money = user?.money ?: 0L
     val blueChips = user?.blueChips ?: 0L
     val nextBet = state.wager
-    val wagerOptions = GambleManager.baseWagersForChapter(user?.chapter ?: 1)
+    val wagerOptions = GambleManager.seotdaBaseWagersForChapter(user?.chapter ?: 1)
     var selectedBaseWager by remember { mutableLongStateOf(wagerOptions[1]) }
     var selectedBetCurrency by remember { mutableStateOf(SeotdaBetCurrency.Money) }
     var selectedPlayerCount by remember { mutableIntStateOf(2) }
@@ -2829,7 +2955,7 @@ private fun ThreeCardSeotdaView(viewModel: MainViewModel, speakResult: (String) 
     val state by viewModel.threeCardSeotdaState.collectAsState()
     val money = user?.money ?: 0L
     val blueChips = user?.blueChips ?: 0L
-    val wagerOptions = GambleManager.baseWagersForChapter(user?.chapter ?: 1)
+    val wagerOptions = GambleManager.seotdaBaseWagersForChapter(user?.chapter ?: 1)
     var selectedBaseWager by remember { mutableLongStateOf(wagerOptions[1]) }
     var selectedBetCurrency by remember { mutableStateOf(SeotdaBetCurrency.Money) }
     var selectedPlayerCount by remember { mutableIntStateOf(2) }
@@ -3331,7 +3457,7 @@ private fun SeotdaRankGuide() {
                     "땡잡이(3월+7월): 1땡~9땡을 잡으며 장땡·광땡은 잡지 못합니다.\n" +
                     "암행어사(4월+7월): 13·18광땡을 잡지만 38광땡은 잡지 못합니다.\n" +
                     "구사: 알리 이하 · 멍텅구리 구사: 장땡 이하일 때 재경기합니다.\n" +
-                    "땡 승리: 숫자 × 100만원 · 광땡 승리: 2천만원 · 38광땡: 1억원 보너스\n" +
+                    "땡 승리: 스테이지 비용의 1.0~2.8% · 13·18광땡: 2% · 38광땡: 3% 보너스\n" +
                     "구사(9월+4월) 또는 같은 족보 무승부는 판수 차감 없이 재경기합니다.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -3528,6 +3654,7 @@ private fun SettingsView(
     var showDbEditor by remember { mutableStateOf(false) }
     var showSeotdaNames by remember { mutableStateOf(false) }
     var showCompletedStories by remember { mutableStateOf(false) }
+    var showPrivacyPolicy by remember { mutableStateOf(false) }
     var replayChapter by remember { mutableStateOf<StoryChapter?>(null) }
     var deleteTarget by remember { mutableStateOf<String?>(null) }
     var seotdaName1 by remember { mutableStateOf("") }
@@ -3604,9 +3731,36 @@ private fun SettingsView(
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("섯다 상대 이름 설정") }
                 Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = { showPrivacyPolicy = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("개인정보 처리 안내") }
+                Spacer(Modifier.height(8.dp))
                 OutlinedButton(onLogout, Modifier.fillMaxWidth()) { Text("로그아웃") }
             }}
         }
+    }
+
+    if (showPrivacyPolicy) {
+        AlertDialog(
+            onDismissRequest = { showPrivacyPolicy = false },
+            title = { Text("개인정보 처리 안내") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text("처리하는 정보", fontWeight = FontWeight.Bold)
+                    Text("사용자가 입력한 캐릭터 아이디와 게임 진행 정보는 기기 내부에 저장됩니다. 걸음 퀘스트를 사용할 때 Health Connect에서 일별 걸음 수를 읽습니다.")
+                    Spacer(Modifier.height(10.dp))
+                    Text("이용 목적", fontWeight = FontWeight.Bold)
+                    Text("캐릭터와 게임 진행 상태 저장, 걸음 퀘스트 달성 여부 및 보상 계산에만 사용합니다.")
+                    Spacer(Modifier.height(10.dp))
+                    Text("보관과 제공", fontWeight = FontWeight.Bold)
+                    Text("정보는 외부 서버로 전송하거나 제3자에게 제공하지 않으며 앱 데이터 삭제 또는 캐릭터 삭제 시 기기에서 삭제됩니다. Health Connect 권한은 기기 설정에서 언제든 철회할 수 있습니다.")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPrivacyPolicy = false }) { Text("확인") }
+            },
+        )
     }
 
     if (showCompletedStories) {
@@ -3847,7 +4001,7 @@ private fun SettingsView(
         )
     }
 
-    if (showDbEditor) {
+    if (BuildConfig.DEBUG && showDbEditor) {
         val normalizedColumn = dbColumn.trim().lowercase()
         val dbFields = listOf(
             "money" to (user?.money ?: 0L).toString(),

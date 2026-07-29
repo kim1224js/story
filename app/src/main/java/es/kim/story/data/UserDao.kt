@@ -12,10 +12,35 @@ import kotlinx.coroutines.flow.Flow
     @Upsert suspend fun save(user: UserEntity)
     @Query("DELETE FROM user WHERE userId = :userId")
     suspend fun deleteUser(userId: String): Int
-    @Query("UPDATE user SET money = CASE WHEN :amount <= 0 THEN money WHEN money >= 100000000 - :amount THEN 100000000 ELSE money + :amount END WHERE userId = :userId")
-    suspend fun addMoney(userId: String, amount: Long)
-    @Query("UPDATE user SET money = 100000000 WHERE userId = :userId AND money > 100000000")
-    suspend fun capMoney(userId: String)
+    @Query("UPDATE user SET money = :money, blueChips = blueChips + :blueChips WHERE userId = :userId")
+    suspend fun setMoneyAndAddBlueChips(userId: String, money: Long, blueChips: Long)
+
+    @Transaction
+    suspend fun addMoney(userId: String, amount: Long) {
+        if (amount <= 0L) return
+        val current = getUser(userId) ?: return
+        val total = if (amount > Long.MAX_VALUE - current.money) Long.MAX_VALUE else current.money + amount
+        if (total > MONEY_PER_BLUE_CHIP) {
+            setMoneyAndAddBlueChips(
+                userId = userId,
+                money = total % MONEY_PER_BLUE_CHIP,
+                blueChips = total / MONEY_PER_BLUE_CHIP,
+            )
+        } else {
+            setMoney(userId, total)
+        }
+    }
+
+    @Transaction
+    suspend fun convertMoneyOverflow(userId: String) {
+        val current = getUser(userId) ?: return
+        if (current.money <= MONEY_PER_BLUE_CHIP) return
+        setMoneyAndAddBlueChips(
+            userId = userId,
+            money = current.money % MONEY_PER_BLUE_CHIP,
+            blueChips = current.money / MONEY_PER_BLUE_CHIP,
+        )
+    }
     @Query("UPDATE user SET gender = :gender WHERE userId = :userId")
     suspend fun updateGender(userId: String, gender: String)
     @Query("UPDATE user SET money = :money WHERE userId = :userId")
@@ -39,6 +64,11 @@ import kotlinx.coroutines.flow.Flow
     )
     suspend fun exchangeBlueChip(userId: String, moneyCost: Long): Int
     @Query(
+        "UPDATE user SET blueChips = blueChips - 1, money = money + :moneyValue " +
+            "WHERE userId = :userId AND blueChips >= 1 AND money <= :maxMoneyBeforeExchange",
+    )
+    suspend fun sellBlueChip(userId: String, moneyValue: Long, maxMoneyBeforeExchange: Long): Int
+    @Query(
         "UPDATE user SET blueChips = blueChips - :chipCost, premiumIdColor = 1 " +
             "WHERE userId = :userId AND blueChips >= :chipCost AND premiumIdColor = 0",
     )
@@ -48,6 +78,10 @@ import kotlinx.coroutines.flow.Flow
             "WHERE userId = :userId AND chapter = :chapter AND money >= :cost",
     )
     suspend fun clearStoryChapter(userId: String, chapter: Int, cost: Long): Int
+
+    companion object {
+        private const val MONEY_PER_BLUE_CHIP = 100_000_000L
+    }
 
     @Transaction
     suspend fun settleGamble(userId: String, wager: Long, payout: Long): Boolean {

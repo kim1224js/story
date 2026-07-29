@@ -8,6 +8,5 @@
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowDisablePreview">true</item>
-        <item name="android:enforceStatusBarContrast">false</item>
     </style>
 </resources>

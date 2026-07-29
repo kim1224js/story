@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ProjectS">
+        <item name="android:enforceStatusBarContrast">false</item>
+    </style>
+</resources>

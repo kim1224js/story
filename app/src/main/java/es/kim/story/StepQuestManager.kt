@@ -23,7 +23,7 @@ data class StepQuest(
     val id: String,
     val period: QuestPeriod,
     val target: Long,
-    val reward: Long,
+    val rewardPercent: Double,
 )
 
 data class StepQuestState(
@@ -34,12 +34,12 @@ data class StepQuestState(
 )
 
 val stepQuests = listOf(
-    StepQuest("daily_1000", QuestPeriod.Daily, 1_000, 50_000),
-    StepQuest("daily_5000", QuestPeriod.Daily, 5_000, 100_000),
-    StepQuest("daily_10000", QuestPeriod.Daily, 10_000, 500_000),
-    StepQuest("weekly_10000", QuestPeriod.Weekly, 10_000, 500_000),
-    StepQuest("weekly_30000", QuestPeriod.Weekly, 30_000, 1_000_000),
-    StepQuest("weekly_50000", QuestPeriod.Weekly, 50_000, 1_500_000),
+    StepQuest("daily_1000", QuestPeriod.Daily, 1_000, 3.0),
+    StepQuest("daily_5000", QuestPeriod.Daily, 5_000, 9.0),
+    StepQuest("daily_10000", QuestPeriod.Daily, 10_000, 18.0),
+    StepQuest("weekly_10000", QuestPeriod.Weekly, 10_000, 15.0),
+    StepQuest("weekly_30000", QuestPeriod.Weekly, 30_000, 30.0),
+    StepQuest("weekly_50000", QuestPeriod.Weekly, 50_000, 45.0),
 )
 
 @Singleton
@@ -74,7 +74,7 @@ class StepQuestManager @Inject constructor(
         }
     }
 
-    suspend fun claim(quest: StepQuest, rewardAmount: Long = quest.reward): Boolean {
+    suspend fun claim(quest: StepQuest, rewardAmount: Long): Boolean {
         val current = _state.value
         val steps = if (quest.period == QuestPeriod.Daily) current.dailySteps else current.weeklySteps
         val key = claimKey(quest)

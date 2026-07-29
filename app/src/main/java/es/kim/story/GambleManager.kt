@@ -104,7 +104,8 @@ class GambleManager @Inject constructor(
     private val prefs = context.getSharedPreferences("gamble", Context.MODE_PRIVATE)
     private var currentAccount = ""
     private var opponentNames = DEFAULT_SEOTDA_OPPONENT_NAMES
-    private var allowedBaseWagers = baseWagersForChapter(1)
+    private var allowedRpsWagers = baseWagersForChapter(1)
+    private var allowedSeotdaWagers = seotdaBaseWagersForChapter(1)
     private var currentStageClearCost = stageClearCost(1)
     private var loadedDate = LocalDate.now().toString()
     private var preparedChoice = randomChoice()
@@ -118,7 +119,8 @@ class GambleManager @Inject constructor(
     fun selectAccount(userId: String, seotdaOpponentNames: List<String>, chapter: Int) {
         opponentNames = seotdaOpponentNames.takeIf { it.size == 3 && it.none(String::isBlank) }
             ?: DEFAULT_SEOTDA_OPPONENT_NAMES
-        allowedBaseWagers = baseWagersForChapter(chapter)
+        allowedRpsWagers = baseWagersForChapter(chapter)
+        allowedSeotdaWagers = seotdaBaseWagersForChapter(chapter)
         currentStageClearCost = stageClearCost(chapter)
         if (currentAccount == userId) return
         currentAccount = userId
@@ -133,7 +135,7 @@ class GambleManager @Inject constructor(
     suspend fun play(player: RpsChoice, wager: Long): Boolean {
         resetDayIfNeeded()
         val current = _state.value
-        if (currentAccount.isBlank() || wager !in allowedBaseWagers) return false
+        if (currentAccount.isBlank() || wager !in allowedRpsWagers) return false
         if (current.replayWager > 0 && wager != current.replayWager) return false
         val computer = preparedChoice
         val outcome = outcome(player, computer)
@@ -452,14 +454,19 @@ class GambleManager @Inject constructor(
     private fun ddaengPremium(outcome: SeotdaOutcome, rank: SeotdaHandRank): Long {
         if (outcome != SeotdaOutcome.Win) return 0L
         return when (rank.name) {
-            "38광땡" -> currentStageClearCost / 4L
-            "18광땡", "13광땡" -> currentStageClearCost / 10L
-            else -> if (rank.ddaengNumber > 0) currentStageClearCost * rank.ddaengNumber / 100L else 0L
+            "38광땡" -> currentStageClearCost * 3L / 100L
+            "18광땡", "13광땡" -> currentStageClearCost / 50L
+            else -> if (rank.ddaengNumber > 0) {
+                val bonusBasisPoints = 100L + (rank.ddaengNumber - 1).coerceAtLeast(0) * 20L
+                currentStageClearCost * bonusBasisPoints / 10_000L
+            } else {
+                0L
+            }
         }
     }
 
     private fun validBaseWager(wager: Long, currency: SeotdaBetCurrency): Boolean =
-        if (currency == SeotdaBetCurrency.Money) wager in allowedBaseWagers
+        if (currency == SeotdaBetCurrency.Money) wager in allowedSeotdaWagers
         else wager == BLUE_CHIP_BASE_WAGER
 
     private suspend fun settleBet(
@@ -537,11 +544,17 @@ class GambleManager @Inject constructor(
                 (clearCost / 20L).coerceAtLeast(1L),
             )
         }
+
+        fun seotdaBaseWagersForChapter(chapter: Int): List<Long> {
+            val clearCost = stageClearCost(chapter)
+            return listOf(
+                (clearCost / 400L).coerceAtLeast(1L),
+                (clearCost / 200L).coerceAtLeast(1L),
+                (clearCost / 100L).coerceAtLeast(1L),
+            )
+        }
         const val SEOTDA_MAX_RAISES = 3
         const val GAMBLE_COUNT_RESET_COST = 1_000_000L
-        const val DDAENG_PREMIUM_UNIT = 1_000_000L
-        const val BRIGHT_DDAENG_PREMIUM = 20_000_000L
-        const val THIRTY_EIGHT_BRIGHT_PREMIUM = 100_000_000L
         const val BLUE_CHIP_BASE_WAGER = 1L
         val DEFAULT_SEOTDA_OPPONENT_NAMES = listOf("졸린", "토끼", "콜라")
 

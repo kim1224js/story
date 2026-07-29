@@ -77,15 +77,13 @@ import javax.inject.Inject
         workManager.recordPuzzleScore(score)
         if (score <= 0 || clearReward <= 0) return
         val currentUser = user.value ?: return
-        val reward = runCatching {
-            Math.multiplyExact(score.toLong(), clearReward / 1_000L)
-        }.getOrDefault(0L)
+        val reward = calculatePuzzleReward(score, clearReward)
         if (reward <= 0) return
         viewModelScope.launch { repository.addMoney(currentUser.userId, reward) }
     }
     fun claimJob(job: PartTimeJob) {
         val currentUser = user.value ?: return
-        val reward = scaledChapterReward(job.reward, currentUser.chapter)
+        val reward = stagePercentReward(currentUser.chapter, job.rewardPercent)
         if (workManager.claim(job)) viewModelScope.launch {
             repository.addMoney(currentUser.userId, reward)
         }
@@ -94,7 +92,7 @@ import javax.inject.Inject
         runCatching { stepQuestManager.refresh() }
     }
     fun claimStepQuest(quest: StepQuest, moreRewardApplied: Boolean = false) = viewModelScope.launch {
-        val chapterReward = scaledChapterReward(quest.reward, user.value?.chapter ?: 1)
+        val chapterReward = stagePercentReward(user.value?.chapter ?: 1, quest.rewardPercent)
         val reward = if (moreRewardApplied) chapterReward + chapterReward / 2 else chapterReward
         stepQuestManager.claim(quest, reward)
     }
@@ -146,6 +144,9 @@ import javax.inject.Inject
     }
     fun exchangeBlueChip(onSuccess: () -> Unit = {}) = viewModelScope.launch {
         if (repository.exchangeBlueChip()) onSuccess()
+    }
+    fun sellBlueChip(onSuccess: () -> Unit = {}) = viewModelScope.launch {
+        if (repository.sellBlueChip()) onSuccess()
     }
     fun buyPremiumIdColor() = viewModelScope.launch { repository.buyPremiumIdColor() }
     fun clearStoryChapter(chapter: Int, cost: Long) = viewModelScope.launch {

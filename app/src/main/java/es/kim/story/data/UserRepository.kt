@@ -27,15 +27,15 @@ import javax.inject.Singleton
         return true
     }
     suspend fun switchAccount(userId: String) {
-        dao.capMoney(userId)
+        dao.convertMoneyOverflow(userId)
         prefs.edit().putString("user_id", userId).apply()
         activeUserId.value = userId
     }
     suspend fun addMoney(amount: Long) {
-        if (amount > 0) dao.addMoney(activeUserId.value, amount.coerceAtMost(MAX_PLAYER_MONEY))
+        if (amount > 0) dao.addMoney(activeUserId.value, amount)
     }
     suspend fun addMoney(userId: String, amount: Long) {
-        if (amount > 0) dao.addMoney(userId, amount.coerceAtMost(MAX_PLAYER_MONEY))
+        if (amount > 0) dao.addMoney(userId, amount)
     }
     suspend fun spendMoney(amount: Long): Boolean =
         amount > 0 && dao.spendMoney(activeUserId.value, amount) == 1
@@ -61,6 +61,12 @@ import javax.inject.Singleton
     suspend fun addBlueChips(amount: Long) = dao.addBlueChips(activeUserId.value, amount)
     suspend fun exchangeBlueChip(): Boolean =
         dao.exchangeBlueChip(activeUserId.value, BLUE_CHIP_EXCHANGE_COST) == 1
+    suspend fun sellBlueChip(): Boolean =
+        dao.sellBlueChip(
+            activeUserId.value,
+            BLUE_CHIP_SELL_VALUE,
+            MAX_PLAYER_MONEY - BLUE_CHIP_SELL_VALUE,
+        ) == 1
     suspend fun buyPremiumIdColor(): Boolean =
         dao.buyPremiumIdColor(activeUserId.value, PREMIUM_ID_COLOR_COST) == 1
     suspend fun clearStoryChapter(chapter: Int, cost: Long): Boolean =
@@ -80,7 +86,8 @@ import javax.inject.Singleton
 
     companion object {
         const val MAX_ACCOUNTS = 3
-        const val BLUE_CHIP_EXCHANGE_COST = 10_000_000L
+        const val BLUE_CHIP_EXCHANGE_COST = 100_000_000L
+        const val BLUE_CHIP_SELL_VALUE = 95_000_000L
         const val PREMIUM_ID_COLOR_COST = 100L
     }
 }

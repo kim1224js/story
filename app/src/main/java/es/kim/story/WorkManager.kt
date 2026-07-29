@@ -27,7 +27,7 @@ internal fun mazeExitCells(seed: Long): Set<Int> {
     return boundary.take(2).toSet()
 }
 
-data class PartTimeJob(val id: String, val title: String, val durationMillis: Long, val durationLabel: String, val reward: Long, val oncePerDay: Boolean = false)
+data class PartTimeJob(val id: String, val title: String, val durationMillis: Long, val durationLabel: String, val rewardPercent: Double, val oncePerDay: Boolean = false)
 data class ActiveJob(val jobId: String, val startedAt: Long)
 data class WorkState(
     val activeJob: ActiveJob? = null,
@@ -50,10 +50,10 @@ data class WorkState(
 )
 
 val partTimeJobs = listOf(
-    PartTimeJob("cafe_4", "영자네 카페 알바", 4 * 60 * 60 * 1_000L, "4시간", 100_000),
-    PartTimeJob("cafe_8", "영자네 카페 알바", 8 * 60 * 60 * 1_000L, "8시간", 150_000),
-    PartTimeJob("cafe_12", "영자네 카페 알바", 12 * 60 * 60 * 1_000L, "12시간", 200_000),
-    PartTimeJob("walk_kkami", "김은성 산책하기", 30 * 60 * 1_000L, "30분 · 하루 한 번", 200_000, true),
+    PartTimeJob("cafe_4", "영자네 카페 알바", 4 * 60 * 60 * 1_000L, "4시간", 15.0),
+    PartTimeJob("cafe_8", "영자네 카페 알바", 8 * 60 * 60 * 1_000L, "8시간", 30.0),
+    PartTimeJob("cafe_12", "영자네 카페 알바", 12 * 60 * 60 * 1_000L, "12시간", 45.0),
+    PartTimeJob("walk_kkami", "김은성 산책하기", 30 * 60 * 1_000L, "30분 · 하루 한 번", 50.0, true),
 )
 
 @Singleton
@@ -185,7 +185,7 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
         if (active.jobId != job.id || System.currentTimeMillis() < active.startedAt + job.durationMillis) return false
         return update(current.copy(
             activeJob = null,
-            balance = current.balance + job.reward,
+            balance = current.balance,
             lastWalkRewardDate = if (job.oncePerDay) LocalDate.now().toString() else current.lastWalkRewardDate,
         ))
     }
