@@ -412,8 +412,11 @@ private fun stockPriceForSlot(stock: StockDefinition, slot: Long, base: Long): L
     }
 }
 private fun stockMovement(stock: StockDefinition, slot: Long, accountSeed: Long = 0L): Double {
-    val random = seededUnit(stock.id.hashCode().toLong() xor accountSeed, slot)
-    val normal = (random * 2.0 - 1.0) * stock.volatility
+    val seed = stock.id.hashCode().toLong() xor accountSeed
+    val rising = seededUnit(seed, slot) < 0.55
+    val magnitude = (0.15 + seededUnit(seed xor 0x5550_3435L, slot) * 0.85) *
+        stock.volatility
+    val normal = if (rising) magnitude else -magnitude
     val breaking = breakingDirection(stock.id, slot)
     return (normal + breaking).coerceIn(-7.0, 7.0)
 }
@@ -539,10 +542,12 @@ private fun newsFor(quote: StockQuote, slot: Long): StockNews {
     )
 }
 private fun circuitDirection(stockId: String, slot: Long): Double {
-    val chance = (seededUnit(stockId.hashCode().toLong() xor 0x19C7_20L, slot) * 10_000).toInt()
-    if (chance >= 5) return 0.0
-    val rising = seededUnit(stockId.hashCode().toLong() xor 0x72A1_55L, slot) >= 0.5
-    return if (rising) 20.0 else -20.0
+    val seed = stockId.hashCode().toLong()
+    val risingChance = seededUnit(seed xor 0x19C7_20L, slot)
+    if (risingChance < 0.05) return 20.0
+
+    val fallingChance = seededUnit(seed xor 0x72A1_55L, slot)
+    return if (fallingChance < 0.025) -20.0 else 0.0
 }
 
 private fun marketTrendDirection(slot: Long): Int {

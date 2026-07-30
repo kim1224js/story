@@ -1,5 +1,7 @@
 package es.kim.story
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -177,7 +179,72 @@ internal fun StockView(viewModel: MainViewModel) {
             },
             confirmButton = { Button(onClick = { saleResult = null }) { Text("확인") } },
         )
-    }}
+    }
+    if (
+        saleResult == null &&
+        state.pendingBreakingNews.isEmpty() &&
+        state.reconnectChanges.isNotEmpty()
+    ) {
+        ReconnectChangeDialog(
+            changes = state.reconnectChanges,
+            elapsedSlots = state.elapsedMarketSlots,
+            onConfirm = viewModel::acknowledgeStockReconnectChanges,
+        )
+    }
+}
+
+@Composable
+private fun ReconnectChangeDialog(
+    changes: List<StockReconnectChange>,
+    elapsedSlots: Long,
+    onConfirm: () -> Unit,
+) {
+    val totalChange = changes.sumOf(StockReconnectChange::valueChange)
+    AlertDialog(
+        onDismissRequest = {},
+        icon = { Text(if (totalChange >= 0L) "📈" else "📉") },
+        title = { Text("보유 주식 변동", fontWeight = FontWeight.ExtraBold) },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("${elapsedSlots * 5}분 동안의 변동 내역이에요.")
+                changes.forEach { change ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text("${change.stockName} · ${change.quantity}주")
+                        Text(
+                            "${if (change.valueChange >= 0L) "+" else ""}${stockWon(change.valueChange)} " +
+                                "(${"%+.2f".format(Locale.KOREAN, change.changePercent)}%)",
+                            color = stockChangeColor(change.valueChange.toDouble()),
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+                HorizontalDivider()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text("전체 평가금 변동", fontWeight = FontWeight.ExtraBold)
+                    Text(
+                        "${if (totalChange >= 0L) "+" else ""}${stockWon(totalChange)}",
+                        color = stockChangeColor(totalChange.toDouble()),
+                        fontWeight = FontWeight.Black,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm) { Text("확인") }
+        },
+    )
+}
 
 @Composable
 private fun ReconnectChangeCard(
