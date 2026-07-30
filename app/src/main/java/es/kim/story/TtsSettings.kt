@@ -10,6 +10,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import java.util.Locale
 
 internal enum class TtsRole { Guide, Celebration, StoryCharacter, GameCharacter }
@@ -36,6 +39,26 @@ internal data class AppTtsSettings(
 
 internal val LocalTtsSettings = staticCompositionLocalOf { AppTtsSettings() }
 
+@Composable
+internal fun StopTtsOnBackground(
+    tts: TextToSpeech?,
+    onStopped: () -> Unit = {},
+) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val currentTts by rememberUpdatedState(tts)
+    val currentOnStopped by rememberUpdatedState(onStopped)
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                currentTts?.stop()
+                currentOnStopped()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+}
+
 internal fun configureAppTts(
     tts: TextToSpeech,
     settings: AppTtsSettings,
@@ -59,6 +82,7 @@ internal fun TtsSettingsPanel(
     var engine by remember { mutableStateOf<TextToSpeech?>(null) }
     var voices by remember { mutableStateOf(emptyList<Voice>()) }
     var ready by remember { mutableStateOf(false) }
+    StopTtsOnBackground(engine)
 
     DisposableEffect(context) {
         val tts = TextToSpeech(context.applicationContext) { status ->

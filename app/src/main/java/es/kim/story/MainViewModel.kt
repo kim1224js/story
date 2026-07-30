@@ -37,9 +37,12 @@ import javax.inject.Inject
             }
         }
     }
-    fun refreshStocks(checkReconnect: Boolean = false) =
+    fun refreshStocks(
+        checkReconnect: Boolean = false,
+        checkBreaking: Boolean = checkReconnect,
+    ) =
         stockManager.refresh(
-            checkBreaking = checkReconnect,
+            checkBreaking = checkBreaking,
             captureReconnectChanges = checkReconnect,
         )
     fun acknowledgeStockBreakingNews() = stockManager.acknowledgeBreakingNews()

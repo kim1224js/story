@@ -118,9 +118,11 @@ fun PuzzleGameView(
     val spriteSheet = ImageBitmap.imageResource(R.drawable.puzzle_tiles)
     val context = LocalContext.current
     val gameAudioVolume = LocalGameAudioVolume.current
+    val pauseBackgroundMusic = LocalBackgroundMusicPause.current
     val ttsSettings = LocalTtsSettings.current
     var tts by remember { mutableStateOf<TextToSpeech?>(null) }
     var ttsReady by remember { mutableStateOf(false) }
+    StopTtsOnBackground(tts)
     val scope = rememberCoroutineScope()
     val puzzleScrollState = rememberScrollState()
     val tones = remember(gameAudioVolume) {
@@ -133,6 +135,14 @@ fun PuzzleGameView(
 
     DisposableEffect(tones) { onDispose { tones.release() } }
     DisposableEffect(comboSoundPool) { onDispose { comboSoundPool.release() } }
+    LaunchedEffect(gamePhase) {
+        pauseBackgroundMusic(
+            gamePhase == PuzzlePhase.Countdown || gamePhase == PuzzlePhase.Playing,
+        )
+    }
+    DisposableEffect(pauseBackgroundMusic) {
+        onDispose { pauseBackgroundMusic(false) }
+    }
     DisposableEffect(context) {
         val engine = TextToSpeech(context.applicationContext) { status ->
             if (status == TextToSpeech.SUCCESS) {

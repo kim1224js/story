@@ -47,6 +47,7 @@ class MainActivity : ComponentActivity() {
 private enum class Screen { Splash, Login, Home, Switching }
 
 val LocalGameAudioVolume = staticCompositionLocalOf { 1f }
+val LocalBackgroundMusicPause = staticCompositionLocalOf<(Boolean) -> Unit> { {} }
 
 @Composable private fun StoryApp(vm: MainViewModel = viewModel()) {
     val context = LocalContext.current
@@ -90,6 +91,10 @@ val LocalGameAudioVolume = staticCompositionLocalOf { 1f }
         )
     }
     var homeBgm by remember { mutableIntStateOf(R.raw.bgm_wandering_woodlands) }
+    var bgmPausedByGame by remember { mutableStateOf(false) }
+    val setBgmPausedByGame = remember {
+        { paused: Boolean -> bgmPausedByGame = paused }
+    }
     val savedUser by vm.user.collectAsState()
     val accounts by vm.accounts.collectAsState()
     var screen by remember { mutableStateOf(Screen.Splash) }
@@ -128,9 +133,11 @@ val LocalGameAudioVolume = staticCompositionLocalOf { 1f }
         },
         enabled = bgmEnabled && masterVolume > 0f,
         volume = bgmVolume * masterVolume,
+        paused = bgmPausedByGame,
     )
     CompositionLocalProvider(
         LocalGameAudioVolume provides if (gameSoundEnabled) gameSoundVolume * masterVolume else 0f,
+        LocalBackgroundMusicPause provides setBgmPausedByGame,
         LocalTtsSettings provides ttsSettings,
     ) {
     Scaffold(Modifier.fillMaxSize()) { padding -> Box(Modifier.fillMaxSize().padding(padding)) {
@@ -227,7 +234,7 @@ val LocalGameAudioVolume = staticCompositionLocalOf { 1f }
 }
 
 @Composable
-private fun AppBackgroundMusic(musicRes: Int, enabled: Boolean, volume: Float) {
+private fun AppBackgroundMusic(musicRes: Int, enabled: Boolean, volume: Float, paused: Boolean) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var player by remember { mutableStateOf<MediaPlayer?>(null) }
@@ -238,7 +245,7 @@ private fun AppBackgroundMusic(musicRes: Int, enabled: Boolean, volume: Float) {
             MediaPlayer.create(context.applicationContext, musicRes)?.apply {
                 isLooping = true
                 setVolume(volume, volume)
-                start()
+                if (!paused) start()
             }
         } else {
             null
@@ -251,11 +258,19 @@ private fun AppBackgroundMusic(musicRes: Int, enabled: Boolean, volume: Float) {
     LaunchedEffect(volume) {
         player?.setVolume(volume, volume)
     }
-    DisposableEffect(lifecycleOwner, enabled) {
+    LaunchedEffect(paused, enabled) {
+        if (!enabled) return@LaunchedEffect
+        if (paused) {
+            if (player?.isPlaying == true) player?.pause()
+        } else if (player?.isPlaying == false) {
+            player?.start()
+        }
+    }
+    DisposableEffect(lifecycleOwner, enabled, paused) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> {
-                    if (enabled && player?.isPlaying == false) player?.start()
+                    if (enabled && !paused && player?.isPlaying == false) player?.start()
                 }
                 Lifecycle.Event.ON_STOP -> {
                     if (player?.isPlaying == true) player?.pause()

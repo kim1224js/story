@@ -44,7 +44,7 @@ internal fun StockView(viewModel: MainViewModel) {
             val now = LocalDateTime.now()
             val secondsUntilNextSlot = (5 - now.minute % 5) * 60L - now.second
             delay(secondsUntilNextSlot.coerceAtLeast(5L) * 1_000L)
-            viewModel.refreshStocks()
+            viewModel.refreshStocks(checkBreaking = true)
         }
     }
 

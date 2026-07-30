@@ -119,9 +119,13 @@ internal fun WorkView(
     val iceCrackSound = remember(iceSoundPool) {
         iceSoundPool.load(context, R.raw.sfx_ice_crack, 1)
     }
+    val mazeStepSound = remember(iceSoundPool) {
+        iceSoundPool.load(context, R.raw.sfx_maze_step, 1)
+    }
     val moleEffectScope = rememberCoroutineScope()
     var moleTts by remember { mutableStateOf<TextToSpeech?>(null) }
     var moleTtsReady by remember { mutableStateOf(false) }
+    StopTtsOnBackground(moleTts)
 
     DisposableEffect(context) {
         val engine = TextToSpeech(context.applicationContext) { status ->
@@ -438,7 +442,14 @@ internal fun WorkView(
                     val targetX = state.mazeX + dx
                     val targetY = state.mazeY + dy
                     if (viewModel.moveMaze(targetX, targetY, itemId)) {
-                        mazeToneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 65)
+                        iceSoundPool.play(
+                            mazeStepSound,
+                            gameAudioVolume,
+                            gameAudioVolume,
+                            1,
+                            0,
+                            0.96f + Random.nextFloat() * 0.08f,
+                        )
                         if (targetY * MAZE_SIZE + targetX in mazeExitCells(state.mazeSeed)) {
                             viewModel.completeMaze(mazeReward)
                             mazeToneGenerator.startTone(ToneGenerator.TONE_PROP_ACK, 650)
@@ -1159,7 +1170,7 @@ internal fun MazeGameView(
     val today = LocalDate.now().toString()
     val usedToday = if (state.mazeMoveDate == today) state.mazeMovesToday else 0
     val bonusToday = if (state.mazeMoveDate == today) state.mazeBonusMovesToday else 0
-    val dailyLimit = 50 + bonusToday
+    val dailyLimit = MAZE_DAILY_MOVE_LIMIT + bonusToday
     val remaining = (dailyLimit - usedToday).coerceAtLeast(0)
     val currentCell = state.mazeY * MAZE_SIZE + state.mazeX
     val currentOpenings = maze.openings[currentCell]

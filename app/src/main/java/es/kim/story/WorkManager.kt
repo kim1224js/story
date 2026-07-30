@@ -8,6 +8,7 @@ import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
 internal const val MAZE_GRID_SIZE = 30
+internal const val MAZE_DAILY_MOVE_LIMIT = 200
 
 internal fun mazeExitCells(seed: Long): Set<Int> {
     val last = MAZE_GRID_SIZE - 1
@@ -151,7 +152,7 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
         if (current.mazeSeed == 0L || current.mazeCompleted) return false
         val movesToday = if (current.mazeMoveDate == today) current.mazeMovesToday else 0
         val bonusToday = if (current.mazeMoveDate == today) current.mazeBonusMovesToday else 0
-        val dailyLimit = 50 + bonusToday
+        val dailyLimit = MAZE_DAILY_MOVE_LIMIT + bonusToday
         if (movesToday >= dailyLimit) return false
         val isNewItem = itemId != null && itemId !in current.mazeCollectedItems
         val collected = if (isNewItem) current.mazeCollectedItems + itemId!!

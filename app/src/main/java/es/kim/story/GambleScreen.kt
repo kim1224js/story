@@ -72,6 +72,7 @@ internal fun GambleView(viewModel: MainViewModel) {
     val gameLabels = listOf("가위바위보", "1대1 카드", "3장 카드", "교환소")
     var gambleTts by remember { mutableStateOf<TextToSpeech?>(null) }
     var gambleTtsReady by remember { mutableStateOf(false) }
+    StopTtsOnBackground(gambleTts)
 
     DisposableEffect(context) {
         val engine = TextToSpeech(context.applicationContext) { status ->

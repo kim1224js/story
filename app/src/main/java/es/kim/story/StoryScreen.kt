@@ -77,6 +77,7 @@ internal fun StoryView(viewModel: MainViewModel) {
     var storyTts by remember { mutableStateOf<TextToSpeech?>(null) }
     var storyTtsReady by remember { mutableStateOf(false) }
     var storyReading by remember { mutableStateOf(false) }
+    StopTtsOnBackground(storyTts) { storyReading = false }
     val storyScrollState = rememberScrollState()
 
     DisposableEffect(context) {
