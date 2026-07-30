@@ -33,6 +33,15 @@ data class StockHolding(
     val averagePrice: Long,
 )
 
+data class StockSaleResult(
+    val stockId: String,
+    val stockName: String,
+    val purchasePrice: Long,
+    val salePrice: Long,
+    val quantity: Int,
+    val saleAmount: Long,
+    val realizedProfit: Long,
+)
 data class StockNews(
     val stockId: String,
     val stockName: String,
@@ -48,6 +57,7 @@ data class StockState(
     val holdings: List<StockHolding> = emptyList(),
     val news: List<StockNews> = emptyList(),
     val pendingBreakingNews: List<StockNews> = emptyList(),
+    val realizedProfitByStock: Map<String, Long> = emptyMap(),
     val marketOpen: Boolean = false,
     val lastUpdatedText: String = "",
 )
@@ -86,10 +96,10 @@ class StockManager @Inject constructor(@ApplicationContext context: Context) {
         val quotes = virtualStocks.map { quoteFor(it, slot, chapter) }
         val holdings = loadHoldings()
         val news = quotes.map { newsFor(it, slot) }.sortedByDescending(StockNews::slot)
-        val acknowledged = prefs.getLong(key("breaking_ack_slot"), slot - 120L)
+        val acknowledged = prefs.getLong(key("breaking_ack_slot"), slot - 192L)
         val pending = if (checkBreaking && holdings.isNotEmpty()) {
             val owned = holdings.filter { it.quantity > 0 }.map(StockHolding::stockId).toSet()
-            ((acknowledged + 1)..slot).takeLast(120).mapNotNull { candidateSlot ->
+            ((acknowledged + 1)..slot).takeLast(192).mapNotNull { candidateSlot ->
                 virtualStocks.asSequence().filter { it.id in owned }
                     .map { newsFor(quoteFor(it, candidateSlot, chapter), candidateSlot) }
                     .firstOrNull(StockNews::breaking)
@@ -103,43 +113,61 @@ class StockManager @Inject constructor(@ApplicationContext context: Context) {
             holdings = holdings,
             news = news,
             pendingBreakingNews = pending,
+            realizedProfitByStock = loadRealizedProfits(),
             marketOpen = marketOpen,
             lastUpdatedText = slotText(now, marketOpen),
         )
     }
 
-    fun buy(stockId: String, expectedPrice: Long): Boolean {
+    fun buy(stockId: String, expectedPrice: Long, quantity: Int): Boolean {
+        if (quantity <= 0) return false
         val quote = _state.value.quotes.firstOrNull { it.stock.id == stockId } ?: return false
         if (!isMarketOpen(LocalDateTime.now()) || quote.price != expectedPrice) return false
         val holdings = loadHoldings().toMutableList()
         val index = holdings.indexOfFirst { it.stockId == stockId }
-        if (index < 0) holdings += StockHolding(stockId, 1, quote.price)
+        if (index < 0) holdings += StockHolding(stockId, quantity, quote.price)
         else {
             val old = holdings[index]
-            val total = old.averagePrice * old.quantity.toLong() + quote.price
+            val newQuantity = old.quantity + quantity
+            val total = old.averagePrice * old.quantity.toLong() + quote.price * quantity.toLong()
             holdings[index] = old.copy(
-                quantity = old.quantity + 1,
-                averagePrice = total / (old.quantity + 1),
+                quantity = newQuantity,
+                averagePrice = total / newQuantity,
             )
         }
         saveHoldings(holdings)
         refresh()
         return true
     }
-
-    fun sell(stockId: String): Long {
-        if (!isMarketOpen(LocalDateTime.now())) return 0L
-        val quote = _state.value.quotes.firstOrNull { it.stock.id == stockId } ?: return 0L
+    fun sell(stockId: String, sellAll: Boolean): StockSaleResult? {
+        if (!isMarketOpen(LocalDateTime.now())) return null
+        val quote = _state.value.quotes.firstOrNull { it.stock.id == stockId } ?: return null
         val holdings = loadHoldings().toMutableList()
         val index = holdings.indexOfFirst { it.stockId == stockId && it.quantity > 0 }
-        if (index < 0) return 0L
+        if (index < 0) return null
         val old = holdings[index]
-        if (old.quantity == 1) holdings.removeAt(index) else holdings[index] = old.copy(quantity = old.quantity - 1)
+        val quantity = if (sellAll) old.quantity else 1
+        val saleAmount = quote.price * quantity.toLong()
+        val realizedProfit = (quote.price - old.averagePrice) * quantity.toLong()
+        if (quantity == old.quantity) holdings.removeAt(index)
+        else holdings[index] = old.copy(quantity = old.quantity - quantity)
         saveHoldings(holdings)
+        val profitKey = key("realized_profit_$stockId")
+        prefs.edit().putLong(
+            profitKey,
+            prefs.getLong(profitKey, 0L) + realizedProfit,
+        ).apply()
         refresh()
-        return quote.price
+        return StockSaleResult(
+            stockId = stockId,
+            stockName = quote.stock.name,
+            purchasePrice = old.averagePrice,
+            salePrice = quote.price,
+            quantity = quantity,
+            saleAmount = saleAmount,
+            realizedProfit = realizedProfit,
+        )
     }
-
     fun acknowledgeBreakingNews() {
         val latest = _state.value.pendingBreakingNews.maxOfOrNull(StockNews::slot) ?: marketSlot(LocalDateTime.now())
         prefs.edit().putLong(key("breaking_ack_slot"), latest).apply()
@@ -155,6 +183,10 @@ class StockManager @Inject constructor(@ApplicationContext context: Context) {
         )
     }
 
+    private fun loadRealizedProfits(): Map<String, Long> =
+        virtualStocks.associate { stock ->
+            stock.id to prefs.getLong(key("realized_profit_${stock.id}"), 0L)
+        }
     private fun saveHoldings(holdings: List<StockHolding>) {
         val editor = prefs.edit()
         virtualStocks.forEach { stock ->
@@ -171,15 +203,23 @@ class StockManager @Inject constructor(@ApplicationContext context: Context) {
 private fun quoteFor(stock: StockDefinition, slot: Long, chapter: Int): StockQuote {
     val stageValue = stageClearCost(chapter).coerceAtLeast(10_000L)
     val base = (stageValue * stock.priceRatio).roundToLong().coerceIn(1_000L, 8_000_000L)
-    val currentPercent = stockMovement(stock, slot)
-    val previousPercent = stockMovement(stock, slot - 1)
-    val dailyBias = seededUnit(stock.id.hashCode().toLong(), slot / 120L) * 4.0 - 2.0
-    val price = (base * (1.0 + (dailyBias + currentPercent) / 100.0)).roundToLong().coerceAtLeast(100L)
-    val previousPrice = (base * (1.0 + (dailyBias + previousPercent) / 100.0)).roundToLong().coerceAtLeast(100L)
+    val price = stockPriceForSlot(stock, slot, base)
+    val previousPrice = stockPriceForSlot(stock, slot - 1, base)
     val change = (price - previousPrice) * 100.0 / previousPrice
     return StockQuote(stock, price, previousPrice, change)
 }
 
+private fun stockPriceForSlot(stock: StockDefinition, slot: Long, base: Long): Long {
+    fun regularPrice(targetSlot: Long): Long {
+        val dailyBias = seededUnit(stock.id.hashCode().toLong(), targetSlot / 192L) * 4.0 - 2.0
+        return (base * (1.0 + (dailyBias + stockMovement(stock, targetSlot)) / 100.0))
+            .roundToLong().coerceAtLeast(100L)
+    }
+    val circuit = circuitDirection(stock.id, slot)
+    return if (circuit == 0.0) regularPrice(slot) else {
+        (regularPrice(slot - 1) * (1.0 + circuit / 100.0)).roundToLong().coerceAtLeast(100L)
+    }
+}
 private fun stockMovement(stock: StockDefinition, slot: Long): Double {
     val random = seededUnit(stock.id.hashCode().toLong(), slot)
     val normal = (random * 2.0 - 1.0) * stock.volatility
@@ -236,7 +276,8 @@ private val stockNewsProfiles = mapOf(
 )
 
 private fun newsFor(quote: StockQuote, slot: Long): StockNews {
-    val breaking = breakingDirection(quote.stock.id, slot) != 0.0
+    val circuit = circuitDirection(quote.stock.id, slot)
+    val breaking = circuit != 0.0 || breakingDirection(quote.stock.id, slot) != 0.0
     val up = quote.changePercent >= 0.0
     val profile = stockNewsProfiles.getValue(quote.stock.id)
     val events = if (up) profile.positiveEvents else profile.negativeEvents
@@ -279,6 +320,23 @@ private fun newsFor(quote: StockQuote, slot: Long): StockNews {
             else -> "${quote.stock.name}이 $event 상황을 알리자 투자자들의 경계감이 높아졌습니다."
         }
     }
+    if (circuit != 0.0) {
+        val rising = circuit > 0.0
+        return StockNews(
+            stockId = quote.stock.id,
+            stockName = quote.stock.name,
+            title = "[속보][${if (rising) "상승서킷" else "하락서킷"}] ${quote.stock.name}",
+            summary = if (rising) {
+                "희귀 급등 이벤트가 발생해 5분 전 가격보다 약 20% 상승했습니다."
+            } else {
+                "희귀 급락 이벤트가 발생해 5분 전 가격보다 약 20% 하락했습니다."
+            },
+            changePercent = quote.changePercent,
+            breaking = true,
+            slot = slot,
+        )
+    }
+
     return StockNews(
         stockId = quote.stock.id,
         stockName = quote.stock.name,
@@ -288,6 +346,12 @@ private fun newsFor(quote: StockQuote, slot: Long): StockNews {
         breaking = breaking,
         slot = slot,
     )
+}
+private fun circuitDirection(stockId: String, slot: Long): Double {
+    val chance = (seededUnit(stockId.hashCode().toLong() xor 0x19C7_20L, slot) * 10_000).toInt()
+    if (chance >= 5) return 0.0
+    val rising = seededUnit(stockId.hashCode().toLong() xor 0x72A1_55L, slot) >= 0.5
+    return if (rising) 20.0 else -20.0
 }
 private fun breakingDirection(stockId: String, slot: Long): Double {
     val chance = (seededUnit(stockId.hashCode().toLong() xor 0x5A17L, slot) * 1_000).toInt()
@@ -306,18 +370,17 @@ private fun seededUnit(seed: Long, slot: Long): Double {
 private fun marketSlot(now: LocalDateTime): Long {
     val date = if (now.toLocalTime() < LocalTime.of(8, 0)) now.toLocalDate().minusDays(1) else now.toLocalDate()
     val minute = when {
-        now.toLocalTime() < LocalTime.of(8, 0) -> 595
-        now.toLocalTime() >= LocalTime.of(18, 0) -> 595
+        now.toLocalTime() < LocalTime.of(8, 0) -> 955
         else -> (now.hour - 8) * 60 + now.minute
     }
-    return date.toEpochDay() * 120L + (minute / 5).coerceIn(0, 119)
+    return date.toEpochDay() * 192L + (minute / 5).coerceIn(0, 191)
 }
 
 private fun isMarketOpen(now: LocalDateTime): Boolean =
-    !now.toLocalTime().isBefore(LocalTime.of(8, 0)) && now.toLocalTime().isBefore(LocalTime.of(18, 0))
+    !now.toLocalTime().isBefore(LocalTime.of(8, 0))
 
 private fun slotText(now: LocalDateTime, open: Boolean): String {
-    if (!open) return "장 마감 · 매일 08:00~18:00"
+    if (!open) return "장 마감 · 매일 08:00~24:00"
     val minute = now.minute / 5 * 5
     return "${now.toLocalDate()} %02d:%02d 갱신".format(now.hour, minute)
 }

@@ -39,23 +39,24 @@ import javax.inject.Inject
     }
     fun refreshStocks() = stockManager.refresh()
     fun acknowledgeStockBreakingNews() = stockManager.acknowledgeBreakingNews()
-    fun buyStock(stockId: String, price: Long, onResult: (Boolean) -> Unit = {}) {
-        if (price <= 0L) return onResult(false)
+    fun buyStock(stockId: String, price: Long, quantity: Int, onResult: (Boolean) -> Unit = {}) {
+        if (price <= 0L || quantity <= 0) return onResult(false)
+        val totalCost = runCatching { Math.multiplyExact(price, quantity.toLong()) }
+            .getOrElse { return onResult(false) }
         viewModelScope.launch {
-            if (!repository.spendMoney(price)) return@launch onResult(false)
-            if (!stockManager.buy(stockId, price)) {
-                repository.addMoney(price)
+            if (!repository.spendMoney(totalCost)) return@launch onResult(false)
+            if (!stockManager.buy(stockId, price, quantity)) {
+                repository.addMoney(totalCost)
                 return@launch onResult(false)
             }
             onResult(true)
         }
     }
-    fun sellStock(stockId: String, onResult: (Boolean) -> Unit = {}) {
-        val proceeds = stockManager.sell(stockId)
-        if (proceeds <= 0L) return onResult(false)
+    fun sellStock(stockId: String, sellAll: Boolean, onResult: (StockSaleResult?) -> Unit = {}) {
+        val sale = stockManager.sell(stockId, sellAll) ?: return onResult(null)
         viewModelScope.launch {
-            repository.addMoney(proceeds)
-            onResult(true)
+            repository.addMoney(sale.saleAmount)
+            onResult(sale)
         }
     }
     fun saveUserId(id: String, onResult: (Boolean) -> Unit = {}) {

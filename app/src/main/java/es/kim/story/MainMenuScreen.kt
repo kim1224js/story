@@ -229,6 +229,11 @@ internal fun MainMenuScreen(
             title = { Text("보유 주식 속보", fontWeight = FontWeight.ExtraBold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "${breaking.stockName} · ${breaking.stockId}",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
                     Text(breaking.title, color = Color(0xFFC62828), fontWeight = FontWeight.ExtraBold)
                     Text(breaking.summary)
                     Text(
