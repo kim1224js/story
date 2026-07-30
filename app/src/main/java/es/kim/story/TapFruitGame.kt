@@ -48,6 +48,7 @@ internal fun TapFruitGameView(
     modifier: Modifier = Modifier,
     clearReward: Long,
     bestScore: Int,
+    pictureBestScore: Int,
     onReward: (Int) -> Unit,
 ) {
     var board by remember { mutableStateOf(createTapFruitBoard()) }
@@ -323,7 +324,12 @@ internal fun TapFruitGameView(
                         fontWeight = FontWeight.Black)
                     Text("획득 ${formatGameCurrency(gameResult.reward)}", color = Color(0xFF2E7D32),
                         fontWeight = FontWeight.Bold)
-                    Text("이전 최고 ${gameResult.previousBest}점")
+                    Spacer(Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(8.dp))
+                    Text("그림 팡 최고 점수 ${pictureBestScore}점", fontWeight = FontWeight.ExtraBold)
+                    Text("과일 팡 최고 점수 ${maxOf(gameResult.previousBest, gameResult.score)}점",
+                        fontWeight = FontWeight.ExtraBold)
                 }
             },
             confirmButton = { Button(onClick = ::startRound) { Text("다시 도전") } },

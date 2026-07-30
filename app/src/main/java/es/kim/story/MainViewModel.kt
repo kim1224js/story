@@ -13,6 +13,7 @@ import javax.inject.Inject
     private val workManager: WorkManager,
     private val stepQuestManager: StepQuestManager,
     private val gambleManager: GambleManager,
+    private val stockManager: StockManager,
 ) : ViewModel() {
     val user = repository.user.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val accounts = repository.accounts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -21,17 +22,40 @@ import javax.inject.Inject
     val gambleState = gambleManager.state
     val seotdaState = gambleManager.seotdaState
     val threeCardSeotdaState = gambleManager.threeCardSeotdaState
+    val stockState = stockManager.state
     init {
         viewModelScope.launch {
             user.filterNotNull().collect {
                 workManager.selectAccount(it.userId)
                 stepQuestManager.selectAccount(it.userId)
+                stockManager.selectAccount(it.userId, it.chapter)
                 gambleManager.selectAccount(
                     it.userId,
                     listOf(it.seotdaName1, it.seotdaName2, it.seotdaName3),
                     it.chapter,
                 )
             }
+        }
+    }
+    fun refreshStocks() = stockManager.refresh()
+    fun acknowledgeStockBreakingNews() = stockManager.acknowledgeBreakingNews()
+    fun buyStock(stockId: String, price: Long, onResult: (Boolean) -> Unit = {}) {
+        if (price <= 0L) return onResult(false)
+        viewModelScope.launch {
+            if (!repository.spendMoney(price)) return@launch onResult(false)
+            if (!stockManager.buy(stockId, price)) {
+                repository.addMoney(price)
+                return@launch onResult(false)
+            }
+            onResult(true)
+        }
+    }
+    fun sellStock(stockId: String, onResult: (Boolean) -> Unit = {}) {
+        val proceeds = stockManager.sell(stockId)
+        if (proceeds <= 0L) return onResult(false)
+        viewModelScope.launch {
+            repository.addMoney(proceeds)
+            onResult(true)
         }
     }
     fun saveUserId(id: String, onResult: (Boolean) -> Unit = {}) {
@@ -74,8 +98,8 @@ import javax.inject.Inject
         val currentUser = user.value ?: return
         viewModelScope.launch { repository.addMoney(currentUser.userId, reward) }
     }
-    fun claimPuzzleReward(score: Int, clearReward: Long) {
-        workManager.recordPuzzleScore(score)
+    fun claimPuzzleReward(score: Int, clearReward: Long, tapFruit: Boolean = false) {
+        workManager.recordPuzzleScore(score, tapFruit)
         if (score <= 0 || clearReward <= 0) return
         val currentUser = user.value ?: return
         val reward = calculatePuzzleReward(score, clearReward)

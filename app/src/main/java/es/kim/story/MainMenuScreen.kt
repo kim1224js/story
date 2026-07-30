@@ -71,6 +71,7 @@ private enum class MainMenu(val label: String, val icon: String, val title: Stri
     Settlement("런닝", "👟", "런닝하기", "걸음 수를 채우고 보상을 받는 공간이에요"),
     Gamble("게임", "🎲", "미니게임", "게임 머니로 즐기는 카드와 승부 게임"),
     Puzzle("퍼즐", "🧩", "퍼즐", "블록을 맞추고 연쇄 콤보에 도전해 보세요"),
+    Stock("주식", "📈", "주식", "5분마다 움직이는 가상 주식 시장이에요"),
     Story("스토리", "📖", "스토리", "나의 이야기를 진행해 보세요"),
     Settings("설정", "⚙", "설정", "로컬 프로필과 캐릭터를 관리하세요"),
 }
@@ -98,12 +99,13 @@ internal fun MainMenuScreen(
 ) {
     var selected by remember { mutableStateOf(MainMenu.Story) }
     val user by viewModel.user.collectAsState()
+    val stockState by viewModel.stockState.collectAsState()
     LaunchedEffect(selected, user?.chapter) {
         onBgmTrackChange(
             when (selected) {
                 MainMenu.Work -> R.raw.bgm_jaunt
                 MainMenu.Gamble -> R.raw.bgm_bells_of_winter
-                MainMenu.Puzzle -> R.raw.bgm_fairy_lights
+                MainMenu.Puzzle, MainMenu.Stock -> R.raw.bgm_fairy_lights
                 MainMenu.Story -> if ((user?.chapter ?: 1) >= 21) {
                     R.raw.bgm_creed_of_course
                 } else {
@@ -197,6 +199,7 @@ internal fun MainMenuScreen(
                 MainMenu.Settlement -> SettlementView(viewModel)
                 MainMenu.Gamble -> GambleView(viewModel)
                 MainMenu.Puzzle -> PuzzleView(viewModel)
+                MainMenu.Stock -> StockView(viewModel)
                 MainMenu.Story -> StoryView(viewModel)
                 MainMenu.Settings -> SettingsView(
                     userId = userId,
@@ -218,6 +221,37 @@ internal fun MainMenuScreen(
                 )
             }
         }
+    }
+    stockState.pendingBreakingNews.firstOrNull()?.let { breaking ->
+        AlertDialog(
+            onDismissRequest = {},
+            icon = { Text("🚨", style = MaterialTheme.typography.displaySmall) },
+            title = { Text("보유 주식 속보", fontWeight = FontWeight.ExtraBold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(breaking.title, color = Color(0xFFC62828), fontWeight = FontWeight.ExtraBold)
+                    Text(breaking.summary)
+                    Text(
+                        "${"%+.2f".format(Locale.KOREAN, breaking.changePercent)}%",
+                        color = if (breaking.changePercent >= 0) Color(0xFFD32F2F) else Color(0xFF1976D2),
+                        fontWeight = FontWeight.Black,
+                    )
+                    if (stockState.pendingBreakingNews.size > 1) {
+                        Text("확인하지 않은 속보 ${stockState.pendingBreakingNews.size}건",
+                            style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.acknowledgeStockBreakingNews()
+                    selected = MainMenu.Stock
+                }) { Text("주식 탭 보기") }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::acknowledgeStockBreakingNews) { Text("확인") }
+            },
+        )
     }
 }
 

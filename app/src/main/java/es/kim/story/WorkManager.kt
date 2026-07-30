@@ -53,6 +53,7 @@ data class WorkState(
     val mazeVisitedCells: Set<Int> = setOf(0),
     val mazeCompleted: Boolean = false,
     val puzzleBestScore: Int = 0,
+    val tapFruitBestScore: Int = 0,
 )
 
 val partTimeJobs = listOf(
@@ -204,9 +205,14 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
     }
 
 
-    fun recordPuzzleScore(score: Int): Boolean {
-        if (score <= _state.value.puzzleBestScore) return false
-        return update(_state.value.copy(puzzleBestScore = score))
+    fun recordPuzzleScore(score: Int, tapFruit: Boolean): Boolean {
+        val current = _state.value
+        if (tapFruit) {
+            if (score <= current.tapFruitBestScore) return false
+            return update(current.copy(tapFruitBestScore = score))
+        }
+        if (score <= current.puzzleBestScore) return false
+        return update(current.copy(puzzleBestScore = score))
     }
     fun deleteAccountData(userId: String) {
         val editor = prefs.edit()
@@ -269,6 +275,7 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
             mazeVisitedCells = savedVisited + 0 + (savedMazeY * MAZE_GRID_SIZE + savedMazeX),
             mazeCompleted = prefs.getBoolean(key("maze_completed"), false),
             puzzleBestScore = prefs.getInt(key("puzzle_best_score"), 0),
+            tapFruitBestScore = prefs.getInt(key("tap_fruit_best_score"), 0),
         )
     }
 
@@ -304,6 +311,7 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
             )
             .putBoolean(key("maze_completed"), value.mazeCompleted)
             .putInt(key("puzzle_best_score"), value.puzzleBestScore)
+            .putInt(key("tap_fruit_best_score"), value.tapFruitBestScore)
             .apply()
         return true
     }

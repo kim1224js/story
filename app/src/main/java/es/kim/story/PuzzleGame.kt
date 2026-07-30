@@ -75,14 +75,16 @@ internal fun PuzzleView(viewModel: MainViewModel) {
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 clearReward = clearReward,
                 bestScore = state.puzzleBestScore,
+                tapFruitBestScore = state.tapFruitBestScore,
                 onReward = { score -> viewModel.claimPuzzleReward(score, clearReward) },
             )
         } else {
             TapFruitGameView(
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 clearReward = clearReward,
-                bestScore = state.puzzleBestScore,
-                onReward = { score -> viewModel.claimPuzzleReward(score, clearReward) },
+                bestScore = state.tapFruitBestScore,
+                pictureBestScore = state.puzzleBestScore,
+                onReward = { score -> viewModel.claimPuzzleReward(score, clearReward, tapFruit = true) },
             )
         }
     }
@@ -92,6 +94,7 @@ fun PuzzleGameView(
     modifier: Modifier = Modifier,
     clearReward: Long,
     bestScore: Int,
+    tapFruitBestScore: Int,
     onReward: (score: Int) -> Unit,
 ) {
     var board by remember { mutableStateOf(createPuzzleBoard()) }
@@ -451,8 +454,9 @@ fun PuzzleGameView(
                     Spacer(Modifier.height(12.dp))
                     HorizontalDivider()
                     Spacer(Modifier.height(12.dp))
-                    Text("이전 최고 기록 ${gameResult.previousBest}점")
-                    Text("현재 최고 기록 ${maxOf(gameResult.previousBest, gameResult.score)}점",
+                    Text("그림 팡 최고 점수 ${maxOf(gameResult.previousBest, gameResult.score)}점",
+                        fontWeight = FontWeight.ExtraBold)
+                    Text("과일 팡 최고 점수 ${tapFruitBestScore}점",
                         fontWeight = FontWeight.ExtraBold)
                 }
             },
