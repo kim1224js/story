@@ -38,6 +38,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.roundToInt
 import kotlin.random.Random
 import java.util.Locale
 
@@ -70,11 +71,14 @@ fun PuzzleGameView(
     var inputLocked by remember { mutableStateOf(false) }
     val spriteSheet = ImageBitmap.imageResource(R.drawable.puzzle_tiles)
     val context = LocalContext.current
+    val gameAudioVolume = LocalGameAudioVolume.current
     var tts by remember { mutableStateOf<TextToSpeech?>(null) }
     var ttsReady by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val puzzleScrollState = rememberScrollState()
-    val tones = remember { ToneGenerator(AudioManager.STREAM_MUSIC, 88) }
+    val tones = remember(gameAudioVolume) {
+        ToneGenerator(AudioManager.STREAM_MUSIC, (gameAudioVolume * 100).roundToInt())
+    }
 
     DisposableEffect(tones) { onDispose { tones.release() } }
     DisposableEffect(context) {
@@ -133,12 +137,12 @@ fun PuzzleGameView(
             onReward(score)
             comboMessage = "최종 $score 점 · ${formatPuzzleWon(earnedMoney)} 획득"
             tones.startTone(ToneGenerator.TONE_PROP_ACK, 600)
-            if (ttsReady) {
+            if (ttsReady && gameAudioVolume > 0f) {
                 val recordMessage = if (isNewBest) "새로운 최고 기록입니다!" else "수고하셨습니다!"
                 tts?.speak(
                     "축하합니다! 최종 점수 ${score}점, ${formatPuzzleWon(earnedMoney)}을 획득했습니다. $recordMessage",
                     TextToSpeech.QUEUE_FLUSH,
-                    null,
+                    gameSpeechParams(gameAudioVolume),
                     "puzzle_result_${System.currentTimeMillis()}",
                 )
             }

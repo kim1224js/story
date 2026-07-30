@@ -42,6 +42,7 @@ import javax.inject.Inject
     fun cancelJob() = workManager.cancel()
     fun startMoleGame(): Boolean = workManager.startMoleGame()
     fun startIceGame(): Boolean = workManager.startIceGame()
+    fun breakIce(index: Int): IceBreakResult? = workManager.breakIce(index)
     fun ensureMaze() = workManager.ensureMaze()
     fun moveMaze(targetX: Int, targetY: Int, itemId: Int?): Boolean =
         workManager.moveMaze(targetX, targetY, itemId)

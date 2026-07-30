@@ -5,6 +5,7 @@ import android.media.AudioManager
 import android.media.SoundPool
 import android.media.ToneGenerator
 import android.net.Uri
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
@@ -53,12 +54,17 @@ import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 import kotlin.random.Random
 import java.text.NumberFormat
 import java.time.LocalDate
 import java.util.Locale
 import java.util.Random as JavaRandom
+
+fun gameSpeechParams(volume: Float) = Bundle().apply {
+    putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, volume.coerceIn(0f, 1f))
+}
 
 private enum class MainMenu(val label: String, val icon: String, val title: String, val description: String) {
     Work("알바", "💼", "알바", "한 번에 한 개의 알바만 진행할 수 있어요"),
@@ -76,8 +82,14 @@ fun MainMenuScreen(
     viewModel: MainViewModel,
     bgmEnabled: Boolean,
     bgmVolume: Float,
+    masterVolume: Float,
+    gameSoundEnabled: Boolean,
+    gameSoundVolume: Float,
     onBgmEnabledChange: (Boolean) -> Unit,
     onBgmVolumeChange: (Float) -> Unit,
+    onMasterVolumeChange: (Float) -> Unit,
+    onGameSoundEnabledChange: (Boolean) -> Unit,
+    onGameSoundVolumeChange: (Float) -> Unit,
     onBgmTrackChange: (Int) -> Unit,
     onLogout: () -> Unit,
     onSwitchAccount: (String) -> Unit,
@@ -193,8 +205,14 @@ fun MainMenuScreen(
                     viewModel = viewModel,
                     bgmEnabled = bgmEnabled,
                     bgmVolume = bgmVolume,
+                    masterVolume = masterVolume,
+                    gameSoundEnabled = gameSoundEnabled,
+                    gameSoundVolume = gameSoundVolume,
                     onBgmEnabledChange = onBgmEnabledChange,
                     onBgmVolumeChange = onBgmVolumeChange,
+                    onMasterVolumeChange = onMasterVolumeChange,
+                    onGameSoundEnabledChange = onGameSoundEnabledChange,
+                    onGameSoundVolumeChange = onGameSoundVolumeChange,
                     openDbEditor = openDbEditorRequested,
                     onDbEditorClosed = { openDbEditorRequested = false },
                     onLogout = onLogout,
@@ -463,6 +481,7 @@ private fun WorkView(
     onBgmTrackChange: (Int) -> Unit,
 ) {
     val context = LocalContext.current
+    val gameAudioVolume = LocalGameAudioVolume.current
     val state by viewModel.workState.collectAsState()
     val user by viewModel.user.collectAsState()
     val currentChapter = user?.chapter ?: 1
@@ -482,16 +501,15 @@ private fun WorkView(
     var moleHitEffects by remember { mutableStateOf(emptySet<Int>()) }
     var moleMissEffects by remember { mutableStateOf(emptySet<Int>()) }
     var moleInputLocked by remember { mutableStateOf(false) }
-    var iceGameRunning by remember { mutableStateOf(false) }
-    var icePenguinIndex by remember { mutableIntStateOf(-1) }
-    var brokenIceCells by remember { mutableStateOf(emptySet<Int>()) }
-    var iceAttemptsLeft by remember { mutableIntStateOf(5) }
     var iceGameResult by remember { mutableStateOf<String?>(null) }
-    var icePenguinFound by remember { mutableStateOf(false) }
     var mazeResult by remember { mutableStateOf<String?>(null) }
     val icePenguinReward = stageCostPercentReward(currentClearCost, 6.0)
-    val iceToneGenerator = remember { ToneGenerator(AudioManager.STREAM_MUSIC, 85) }
-    val mazeToneGenerator = remember { ToneGenerator(AudioManager.STREAM_MUSIC, 72) }
+    val iceToneGenerator = remember(gameAudioVolume) {
+        ToneGenerator(AudioManager.STREAM_MUSIC, (gameAudioVolume * 100).roundToInt())
+    }
+    val mazeToneGenerator = remember(gameAudioVolume) {
+        ToneGenerator(AudioManager.STREAM_MUSIC, (gameAudioVolume * 100).roundToInt())
+    }
     val iceSoundPool = remember { SoundPool.Builder().setMaxStreams(3).build() }
     val iceCrackSound = remember(iceSoundPool) {
         iceSoundPool.load(context, R.raw.sfx_ice_crack, 1)
@@ -561,11 +579,11 @@ private fun WorkView(
         moleRunning = false
         val totalReward = Math.multiplyExact(moleHits.toLong(), moleRewardPerHit)
         viewModel.claimMoleReward(moleHits, moleRewardPerHit)
-        if (moleTtsReady) {
+        if (moleTtsReady && gameAudioVolume > 0f) {
             moleTts?.speak(
                 "결과 공개",
                 TextToSpeech.QUEUE_FLUSH,
-                null,
+                gameSpeechParams(gameAudioVolume),
                 "mole_result_${System.currentTimeMillis()}",
             )
         }
@@ -574,7 +592,7 @@ private fun WorkView(
 
     LaunchedEffect(moleCountdown) {
         val count = moleCountdown ?: return@LaunchedEffect
-        if (moleTtsReady) {
+        if (moleTtsReady && gameAudioVolume > 0f) {
             val countdownVoice = when (count) {
                 3 -> "쓰리"
                 2 -> "투"
@@ -584,7 +602,7 @@ private fun WorkView(
             moleTts?.speak(
                 countdownVoice,
                 TextToSpeech.QUEUE_FLUSH,
-                null,
+                gameSpeechParams(gameAudioVolume),
                 "mole_countdown_$count",
             )
         }
@@ -599,10 +617,7 @@ private fun WorkView(
     }
 
     Page(backgroundRes = R.drawable.work_background, backgroundAlpha = 0.5f) {
-        PrimaryScrollableTabRow(
-            selectedTabIndex = workTab,
-            edgePadding = 0.dp,
-        ) {
+        PrimaryTabRow(selectedTabIndex = workTab) {
             Tab(
                 selected = workTab == 0,
                 onClick = { if (!moleRunning && moleCountdown == null) workTab = 0 },
@@ -724,11 +739,11 @@ private fun WorkView(
                         moleTargets = moleTargets - index
                         moleHitEffects = moleHitEffects + index
                         moleHits += 1
-                        if (moleTtsReady) {
+                        if (moleTtsReady && gameAudioVolume > 0f) {
                             moleTts?.speak(
                                 "뀨웅",
                                 TextToSpeech.QUEUE_FLUSH,
-                                null,
+                                gameSpeechParams(gameAudioVolume),
                                 "mole_hit_${System.currentTimeMillis()}",
                             )
                         }
@@ -753,59 +768,48 @@ private fun WorkView(
         } else if (workTab == 2) {
             IcePenguinGameView(
                 modifier = Modifier.fillMaxWidth().weight(1f),
-                running = iceGameRunning,
-                attemptsLeft = iceAttemptsLeft,
-                brokenCells = brokenIceCells,
-                penguinIndex = icePenguinIndex,
-                penguinFound = icePenguinFound,
+                running = state.iceGameRunning,
+                attemptsLeft = state.iceAttemptsLeft,
+                brokenCells = state.iceBrokenCells,
+                penguinIndex = state.icePenguinIndex,
+                penguinFound = state.icePenguinFound,
                 playsToday = state.icePlaysToday,
                 reward = icePenguinReward,
                 onStart = {
-                    if (viewModel.startIceGame()) {
-                        val continuing = brokenIceCells.isNotEmpty() &&
-                            !icePenguinFound &&
-                            iceAttemptsLeft == 0
-                        if (!continuing) {
-                            icePenguinIndex = Random.nextInt(25)
-                            brokenIceCells = emptySet()
-                        }
-                        iceAttemptsLeft = 5
-                        icePenguinFound = false
-                        iceGameResult = null
-                        iceGameRunning = true
-                    }
+                    if (viewModel.startIceGame()) iceGameResult = null
                 },
                 onBreakIce = { index ->
-                    if (iceGameRunning && index !in brokenIceCells) {
-                        iceSoundPool.play(iceCrackSound, 1f, 1f, 1, 0, 1.08f)
-                        brokenIceCells = brokenIceCells + index
-                        iceAttemptsLeft -= 1
-                        if (index == icePenguinIndex) {
-                            icePenguinFound = true
-                            iceGameRunning = false
+                    when (viewModel.breakIce(index)) {
+                        IceBreakResult.Missed -> {
+                            iceSoundPool.play(iceCrackSound, gameAudioVolume, gameAudioVolume, 1, 0, 1.08f)
+                        }
+                        IceBreakResult.Found -> {
+                            iceSoundPool.play(iceCrackSound, gameAudioVolume, gameAudioVolume, 1, 0, 1.08f)
                             viewModel.claimIcePenguinReward(icePenguinReward)
                             iceGameResult =
                                 "펭귄을 찾았습니다!\n${compactWon(icePenguinReward.toDouble())} 획득"
                             moleEffectScope.launch {
                                 delay(180)
                                 iceToneGenerator.startTone(ToneGenerator.TONE_PROP_ACK, 450)
-                                if (moleTtsReady) {
+                                if (moleTtsReady && gameAudioVolume > 0f) {
                                     moleTts?.speak(
                                         "축하해요! 펭귄을 찾았어요!",
                                         TextToSpeech.QUEUE_FLUSH,
-                                        null,
+                                        gameSpeechParams(gameAudioVolume),
                                         "ice_penguin_success_${System.currentTimeMillis()}",
                                     )
                                 }
                             }
-                        } else if (iceAttemptsLeft == 0) {
-                            iceGameRunning = false
+                        }
+                        IceBreakResult.OutOfAttempts -> {
+                            iceSoundPool.play(iceCrackSound, gameAudioVolume, gameAudioVolume, 1, 0, 1.08f)
                             iceGameResult = if (state.icePlaysToday < 5) {
                                 "펭귄을 찾지 못했습니다.\n같은 얼음판에서 이어서 찾아보세요!"
                             } else {
                                 "펭귄을 찾지 못했습니다.\n오늘의 도전 횟수를 모두 사용했습니다."
                             }
                         }
+                        null -> Unit
                     }
                 },
             )
@@ -928,7 +932,7 @@ private fun WorkView(
             properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
             title = {
                 Text(
-                    if (icePenguinFound) "🐧 펭귄 발견!" else "🧊 도전 실패",
+                    if (state.icePenguinFound) "🐧 펭귄 발견!" else "🧊 도전 실패",
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Center,
                     fontWeight = FontWeight.ExtraBold,
@@ -936,7 +940,7 @@ private fun WorkView(
             },
             text = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (icePenguinFound) {
+                    if (state.icePenguinFound) {
                         Image(
                             painter = painterResource(R.drawable.penguin_found),
                             contentDescription = "찾은 펭귄",
@@ -2254,6 +2258,7 @@ private fun InventorySlot(index: Int) {
 @Composable
 private fun GambleView(viewModel: MainViewModel) {
     val context = LocalContext.current
+    val gameAudioVolume = LocalGameAudioVolume.current
     val pagerState = rememberPagerState(pageCount = { 4 })
     val scope = rememberCoroutineScope()
     val gameLabels = listOf("가위바위보", "1대1 카드", "3장 카드", "교환소")
@@ -2278,11 +2283,11 @@ private fun GambleView(viewModel: MainViewModel) {
         }
     }
     val speakResult: (String) -> Unit = { message ->
-        if (gambleTtsReady) {
+        if (gambleTtsReady && gameAudioVolume > 0f) {
             gambleTts?.speak(
                 message,
                 TextToSpeech.QUEUE_FLUSH,
-                null,
+                gameSpeechParams(gameAudioVolume),
                 "gamble_result_${System.currentTimeMillis()}",
             )
         }
@@ -2327,6 +2332,7 @@ private fun GambleView(viewModel: MainViewModel) {
 @Composable
 private fun GambleShopView(viewModel: MainViewModel) {
     val context = LocalContext.current
+    val gameAudioVolume = LocalGameAudioVolume.current
     val user by viewModel.user.collectAsState()
     val money = user?.money ?: 0L
     val blueChips = user?.blueChips ?: 0L
@@ -2390,7 +2396,7 @@ private fun GambleShopView(viewModel: MainViewModel) {
                         Button(
                             onClick = {
                                 viewModel.exchangeBlueChip {
-                                    shopSoundPool.play(exchangeSound, 1f, 1f, 1, 0, 1f)
+                                    shopSoundPool.play(exchangeSound, gameAudioVolume, gameAudioVolume, 1, 0, 1f)
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -2431,7 +2437,7 @@ private fun GambleShopView(viewModel: MainViewModel) {
                         Button(
                             onClick = {
                                 viewModel.sellBlueChip {
-                                    shopSoundPool.play(exchangeSound, 1f, 1f, 1, 0, 0.92f)
+                                    shopSoundPool.play(exchangeSound, gameAudioVolume, gameAudioVolume, 1, 0, 0.92f)
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -3475,6 +3481,7 @@ private fun SeotdaRankGuide() {
 @Composable
 private fun StoryView(viewModel: MainViewModel) {
     val context = LocalContext.current
+    val gameAudioVolume = LocalGameAudioVolume.current
     val user by viewModel.user.collectAsState()
     val currentChapter = user?.chapter ?: 1
     val completed = currentChapter > storyChapters.size
@@ -3570,7 +3577,7 @@ private fun StoryView(viewModel: MainViewModel) {
                                     storyTts?.speak(
                                         storyText,
                                         TextToSpeech.QUEUE_FLUSH,
-                                        null,
+                                        gameSpeechParams(gameAudioVolume),
                                         "story_chapter_${chapter.number}",
                                     )
                                 }
@@ -3642,13 +3649,64 @@ private fun StoryView(viewModel: MainViewModel) {
 }
 
 @Composable
+private fun AudioVolumeControl(
+    icon: String,
+    title: String,
+    description: String,
+    volume: Float,
+    onVolumeChange: (Float) -> Unit,
+    enabled: Boolean = true,
+    switchChecked: Boolean? = null,
+    onSwitchChange: ((Boolean) -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(icon, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(end = 12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.ExtraBold)
+            Text(
+                description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (switchChecked != null && onSwitchChange != null) {
+            Switch(checked = switchChecked, onCheckedChange = onSwitchChange)
+        }
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Slider(
+            value = volume,
+            onValueChange = onVolumeChange,
+            modifier = Modifier.weight(1f),
+            enabled = enabled,
+            valueRange = 0f..1f,
+        )
+        Text(
+            "${(volume * 100).roundToLong()}%",
+            modifier = Modifier.padding(start = 10.dp).widthIn(min = 42.dp),
+            textAlign = TextAlign.End,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.ExtraBold,
+        )
+    }
+}
+@Composable
 private fun SettingsView(
     userId: String,
     viewModel: MainViewModel,
     bgmEnabled: Boolean,
     bgmVolume: Float,
+    masterVolume: Float,
+    gameSoundEnabled: Boolean,
+    gameSoundVolume: Float,
     onBgmEnabledChange: (Boolean) -> Unit,
     onBgmVolumeChange: (Float) -> Unit,
+    onMasterVolumeChange: (Float) -> Unit,
+    onGameSoundEnabledChange: (Boolean) -> Unit,
+    onGameSoundVolumeChange: (Float) -> Unit,
     openDbEditor: Boolean,
     onDbEditorClosed: () -> Unit,
     onLogout: () -> Unit,
@@ -3779,62 +3837,41 @@ private fun SettingsView(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = Color(0xF7FFFFFF)),
             ) {
-                Column(Modifier.fillMaxWidth().padding(18.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            if (bgmEnabled) "🎵" else "🔇",
-                            style = MaterialTheme.typography.titleLarge,
-                            modifier = Modifier.padding(end = 12.dp),
-                        )
-                        Column(Modifier.weight(1f)) {
-                            Text("배경 음악", fontWeight = FontWeight.ExtraBold)
-                            Text(
-                                if (bgmEnabled) "장면에 어울리는 음악이 재생 중이에요"
-                                else "배경 음악을 쉬게 하고 있어요",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(checked = bgmEnabled, onCheckedChange = onBgmEnabledChange)
-                    }
-                    Spacer(Modifier.height(14.dp))
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            "음량",
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Surface(
-                            shape = RoundedCornerShape(50),
-                            color = if (bgmEnabled) Color(0xFFE8F2D7) else Color(0xFFF0F0F0),
-                        ) {
-                            Text(
-                                "${(bgmVolume * 100).roundToLong()}%",
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (bgmEnabled) Color(0xFF536B36)
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    Slider(
-                        value = bgmVolume,
-                        onValueChange = onBgmVolumeChange,
-                        modifier = Modifier.fillMaxWidth(),
+                Column(
+                    Modifier.fillMaxWidth().padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    AudioVolumeControl(
+                        icon = "🔊",
+                        title = "전체 볼륨",
+                        description = "배경음악과 게임 소리를 한 번에 조절해요",
+                        volume = masterVolume,
+                        onVolumeChange = onMasterVolumeChange,
+                    )
+                    HorizontalDivider(color = Color(0xFFE6E3DA))
+                    AudioVolumeControl(
+                        icon = if (bgmEnabled) "🎵" else "🔇",
+                        title = "배경음악",
+                        description = if (bgmEnabled) "장면에 어울리는 음악" else "배경음악이 꺼져 있어요",
+                        volume = bgmVolume,
+                        onVolumeChange = onBgmVolumeChange,
                         enabled = bgmEnabled,
-                        valueRange = 0f..1f,
+                        switchChecked = bgmEnabled,
+                        onSwitchChange = onBgmEnabledChange,
+                    )
+                    HorizontalDivider(color = Color(0xFFE6E3DA))
+                    AudioVolumeControl(
+                        icon = if (gameSoundEnabled) "🎮" else "🔇",
+                        title = "게임 효과음·음성",
+                        description = if (gameSoundEnabled) "퍼즐, 얼음깨기, 카드게임 등의 소리" else "게임 소리가 꺼져 있어요",
+                        volume = gameSoundVolume,
+                        onVolumeChange = onGameSoundVolumeChange,
+                        enabled = gameSoundEnabled,
+                        switchChecked = gameSoundEnabled,
+                        onSwitchChange = onGameSoundEnabledChange,
                     )
                 }
             }
-
             Text(
                 "게임 관리",
                 modifier = Modifier.padding(start = 4.dp, top = 2.dp),

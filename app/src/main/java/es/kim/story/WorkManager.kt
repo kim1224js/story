@@ -29,6 +29,7 @@ internal fun mazeExitCells(seed: Long): Set<Int> {
 
 data class PartTimeJob(val id: String, val title: String, val durationMillis: Long, val durationLabel: String, val rewardPercent: Double, val oncePerDay: Boolean = false)
 data class ActiveJob(val jobId: String, val startedAt: Long)
+enum class IceBreakResult { Missed, Found, OutOfAttempts }
 data class WorkState(
     val activeJob: ActiveJob? = null,
     val balance: Long = 0,
@@ -37,6 +38,11 @@ data class WorkState(
     val molePlaysToday: Int = 0,
     val icePlayDate: String? = null,
     val icePlaysToday: Int = 0,
+    val icePenguinIndex: Int = -1,
+    val iceBrokenCells: Set<Int> = emptySet(),
+    val iceAttemptsLeft: Int = 5,
+    val iceGameRunning: Boolean = false,
+    val icePenguinFound: Boolean = false,
     val mazeSeed: Long = 0L,
     val mazeX: Int = 0,
     val mazeY: Int = 0,
@@ -94,14 +100,43 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
     fun startIceGame(): Boolean {
         val today = LocalDate.now().toString()
         val current = _state.value
-        val playsToday = if (current.icePlayDate == today) current.icePlaysToday else 0
-        if (playsToday >= 5) return false
+        val sameDay = current.icePlayDate == today
+        val playsToday = if (sameDay) current.icePlaysToday else 0
+        if (playsToday >= 5 || current.iceGameRunning) return false
+        val continuing = sameDay && current.iceBrokenCells.isNotEmpty() &&
+            !current.icePenguinFound && current.iceAttemptsLeft == 0
         return update(
             current.copy(
                 icePlayDate = today,
                 icePlaysToday = playsToday + 1,
+                icePenguinIndex = if (continuing) current.icePenguinIndex else kotlin.random.Random.nextInt(25),
+                iceBrokenCells = if (continuing) current.iceBrokenCells else emptySet(),
+                iceAttemptsLeft = 5,
+                iceGameRunning = true,
+                icePenguinFound = false,
             ),
         )
+    }
+
+    fun breakIce(index: Int): IceBreakResult? {
+        val current = _state.value
+        if (!current.iceGameRunning || index !in 0 until 25 || index in current.iceBrokenCells) return null
+        val found = index == current.icePenguinIndex
+        val attemptsLeft = (current.iceAttemptsLeft - 1).coerceAtLeast(0)
+        val result = when {
+            found -> IceBreakResult.Found
+            attemptsLeft == 0 -> IceBreakResult.OutOfAttempts
+            else -> IceBreakResult.Missed
+        }
+        update(
+            current.copy(
+                iceBrokenCells = current.iceBrokenCells + index,
+                iceAttemptsLeft = attemptsLeft,
+                iceGameRunning = result == IceBreakResult.Missed,
+                icePenguinFound = found,
+            ),
+        )
+        return result
     }
 
     fun ensureMaze() {
@@ -207,6 +242,14 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
             molePlaysToday = if (savedMoleDate == today) prefs.getInt(key("mole_plays_today"), 0) else 0,
             icePlayDate = savedIceDate,
             icePlaysToday = if (savedIceDate == today) prefs.getInt(key("ice_plays_today"), 0) else 0,
+            icePenguinIndex = if (savedIceDate == today) prefs.getInt(key("ice_penguin_index"), -1) else -1,
+            iceBrokenCells = if (savedIceDate == today) {
+                prefs.getStringSet(key("ice_broken_cells"), emptySet()).orEmpty()
+                    .mapNotNull(String::toIntOrNull).filter { it in 0 until 25 }.toSet()
+            } else emptySet(),
+            iceAttemptsLeft = if (savedIceDate == today) prefs.getInt(key("ice_attempts_left"), 5) else 5,
+            iceGameRunning = savedIceDate == today && prefs.getBoolean(key("ice_game_running"), false),
+            icePenguinFound = savedIceDate == today && prefs.getBoolean(key("ice_penguin_found"), false),
             mazeSeed = prefs.getLong(key("maze_seed"), 0L),
             mazeX = savedMazeX,
             mazeY = savedMazeY,
@@ -240,6 +283,11 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
             .putInt(key("mole_plays_today"), value.molePlaysToday)
             .putString(key("ice_play_date"), value.icePlayDate)
             .putInt(key("ice_plays_today"), value.icePlaysToday)
+            .putInt(key("ice_penguin_index"), value.icePenguinIndex)
+            .putStringSet(key("ice_broken_cells"), value.iceBrokenCells.map(Int::toString).toSet())
+            .putInt(key("ice_attempts_left"), value.iceAttemptsLeft)
+            .putBoolean(key("ice_game_running"), value.iceGameRunning)
+            .putBoolean(key("ice_penguin_found"), value.icePenguinFound)
             .putLong(key("maze_seed"), value.mazeSeed)
             .putInt(key("maze_x"), value.mazeX)
             .putInt(key("maze_y"), value.mazeY)

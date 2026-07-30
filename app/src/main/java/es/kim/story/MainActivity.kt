@@ -46,6 +46,8 @@ class MainActivity : ComponentActivity() {
 }
 private enum class Screen { Splash, Login, Home, Switching }
 
+val LocalGameAudioVolume = staticCompositionLocalOf { 1f }
+
 @Composable private fun StoryApp(vm: MainViewModel = viewModel()) {
     val context = LocalContext.current
     val bgmPreferences = remember {
@@ -56,6 +58,15 @@ private enum class Screen { Splash, Login, Home, Switching }
     }
     var bgmVolume by remember {
         mutableFloatStateOf(bgmPreferences.getFloat("bgm_volume", 0.35f))
+    }
+    var masterVolume by remember {
+        mutableFloatStateOf(bgmPreferences.getFloat("master_volume", 1f))
+    }
+    var gameSoundEnabled by remember {
+        mutableStateOf(bgmPreferences.getBoolean("game_sound_enabled", true))
+    }
+    var gameSoundVolume by remember {
+        mutableFloatStateOf(bgmPreferences.getFloat("game_sound_volume", 0.8f))
     }
     var homeBgm by remember { mutableIntStateOf(R.raw.bgm_wandering_woodlands) }
     val savedUser by vm.user.collectAsState()
@@ -94,9 +105,12 @@ private enum class Screen { Splash, Login, Home, Switching }
             Screen.Splash, Screen.Login, Screen.Switching -> R.raw.bgm_fairy_lights
             Screen.Home -> homeBgm
         },
-        enabled = bgmEnabled,
-        volume = bgmVolume,
+        enabled = bgmEnabled && masterVolume > 0f,
+        volume = bgmVolume * masterVolume,
     )
+    CompositionLocalProvider(
+        LocalGameAudioVolume provides if (gameSoundEnabled) gameSoundVolume * masterVolume else 0f,
+    ) {
     Scaffold(Modifier.fillMaxSize()) { padding -> Box(Modifier.fillMaxSize().padding(padding)) {
         when (screen) {
             Screen.Splash -> SplashScreen()
@@ -118,6 +132,9 @@ private enum class Screen { Splash, Login, Home, Switching }
                 vm,
                 bgmEnabled = bgmEnabled,
                 bgmVolume = bgmVolume,
+                masterVolume = masterVolume,
+                gameSoundEnabled = gameSoundEnabled,
+                gameSoundVolume = gameSoundVolume,
                 onBgmEnabledChange = {
                     bgmEnabled = it
                     bgmPreferences.edit().putBoolean("bgm_enabled", it).apply()
@@ -125,6 +142,18 @@ private enum class Screen { Splash, Login, Home, Switching }
                 onBgmVolumeChange = {
                     bgmVolume = it
                     bgmPreferences.edit().putFloat("bgm_volume", it).apply()
+                },
+                onMasterVolumeChange = {
+                    masterVolume = it
+                    bgmPreferences.edit().putFloat("master_volume", it).apply()
+                },
+                onGameSoundEnabledChange = {
+                    gameSoundEnabled = it
+                    bgmPreferences.edit().putBoolean("game_sound_enabled", it).apply()
+                },
+                onGameSoundVolumeChange = {
+                    gameSoundVolume = it
+                    bgmPreferences.edit().putFloat("game_sound_volume", it).apply()
                 },
                 onBgmTrackChange = { homeBgm = it },
                 onLogout = {
@@ -140,6 +169,7 @@ private enum class Screen { Splash, Login, Home, Switching }
             Screen.Switching -> SwitchingScreen()
         }
     }}
+    }
     if (showHealthDisclosure) {
         AlertDialog(
             onDismissRequest = { },
