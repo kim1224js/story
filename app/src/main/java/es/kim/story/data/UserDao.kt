@@ -45,8 +45,6 @@ import kotlinx.coroutines.flow.Flow
     suspend fun updateGender(userId: String, gender: String)
     @Query("UPDATE user SET money = :money WHERE userId = :userId")
     suspend fun setMoney(userId: String, money: Long)
-    @Query("UPDATE user SET chapter = :chapter WHERE userId = :userId")
-    suspend fun setChapter(userId: String, chapter: Int)
     @Query(
         "UPDATE user SET seotdaName1 = :name1, seotdaName2 = :name2, seotdaName3 = :name3 " +
             "WHERE userId = :userId",

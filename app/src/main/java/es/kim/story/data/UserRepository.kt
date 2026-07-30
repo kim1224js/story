@@ -71,19 +71,6 @@ import javax.inject.Singleton
         dao.buyPremiumIdColor(activeUserId.value, PREMIUM_ID_COLOR_COST) == 1
     suspend fun clearStoryChapter(chapter: Int, cost: Long): Boolean =
         dao.clearStoryChapter(activeUserId.value, chapter, cost) == 1
-    suspend fun updateCurrentField(column: String, value: String): Boolean = when (column.lowercase()) {
-        "money" -> value.toLongOrNull()?.takeIf { it >= 0 }?.let {
-            dao.setMoney(activeUserId.value, it.coerceAtMost(MAX_PLAYER_MONEY)); true
-        } ?: false
-        "chapter" -> value.toIntOrNull()?.takeIf { it >= 1 }?.let {
-            dao.setChapter(activeUserId.value, it); true
-        } ?: false
-        "gender" -> value.takeIf { it == "남성" || it == "여성" }?.let {
-            dao.updateGender(activeUserId.value, it); true
-        } ?: false
-        else -> false
-    }
-
     companion object {
         const val MAX_ACCOUNTS = 3
         const val BLUE_CHIP_EXCHANGE_COST = 100_000_000L

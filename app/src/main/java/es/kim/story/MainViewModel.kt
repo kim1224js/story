@@ -137,9 +137,6 @@ import javax.inject.Inject
     fun acknowledgeThreeCardSeotdaReplay() = gambleManager.acknowledgeThreeCardSeotdaReplay()
     fun resetThreeCardSeotdaCount() =
         viewModelScope.launch { gambleManager.resetThreeCardSeotdaCount() }
-    fun updateRoomField(column: String, value: String) = viewModelScope.launch {
-        repository.updateCurrentField(column.trim(), value.trim())
-    }
     fun updateSeotdaNames(names: List<String>) = viewModelScope.launch {
         repository.updateSeotdaNames(names)
     }
