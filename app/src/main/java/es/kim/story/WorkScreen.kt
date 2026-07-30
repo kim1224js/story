@@ -1167,27 +1167,6 @@ internal fun MazeGameView(
                 Modifier.fillMaxWidth().padding(14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text("🧭 무릉도원 미로", color = Color(0xFF00695C),
-                    style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
-                Text(
-                    "30×30 랜덤 미로 · 랜덤 출구 2개 · 4×4 시야",
-                    color = Color(0xFF456A64),
-                    fontWeight = FontWeight.Bold,
-                )
-                Spacer(Modifier.height(6.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    Text("👣 $remaining / $dailyLimit", fontWeight = FontWeight.ExtraBold)
-                    Text("🔷 ${state.mazeCollectedItems.size} / 10",
-                        color = Color(0xFF0277BD), fontWeight = FontWeight.ExtraBold)
-                    Text("🎁 ${compactWon(reward.toDouble())}",
-                        color = Color(0xFF2E7D32), fontWeight = FontWeight.ExtraBold)
-                }
-                Text(
-                    "수정 1개를 먹으면 오늘 바로 1칸 더 이동할 수 있어요.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF546E7A),
-                )
-                Spacer(Modifier.height(10.dp))
 
                 Box(
                     Modifier.fillMaxWidth().aspectRatio(1.18f)
@@ -1295,8 +1274,7 @@ internal fun MazeGameView(
                         modifier = Modifier.align(Alignment.TopEnd).padding(9.dp).size(112.dp),
                     )
                 }
-                Spacer(Modifier.height(12.dp))
-
+                Spacer(Modifier.height(14.dp))
                 val canMove = remaining > 0 && !state.mazeCompleted
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     MazeDirectionButton(
@@ -1328,6 +1306,28 @@ internal fun MazeGameView(
                         enabled = canMove && currentOpenings and MAZE_SOUTH != 0,
                     ) { move(0, 1) }
                 }
+                Spacer(Modifier.height(14.dp))
+                Text("🧭 무릉도원 미로", color = Color(0xFF00695C),
+                    style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                Text(
+                    "30×30 랜덤 미로 · 랜덤 출구 2개 · 4×4 시야",
+                    color = Color(0xFF456A64),
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    Text("👣 $remaining / $dailyLimit", fontWeight = FontWeight.ExtraBold)
+                    Text("🔷 ${state.mazeCollectedItems.size} / 10",
+                        color = Color(0xFF0277BD), fontWeight = FontWeight.ExtraBold)
+                    Text("🎁 ${compactWon(reward.toDouble())}",
+                        color = Color(0xFF2E7D32), fontWeight = FontWeight.ExtraBold)
+                }
+                Text(
+                    "수정 1개를 먹으면 오늘 바로 1칸 더 이동할 수 있어요.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF546E7A),
+                )
+                Spacer(Modifier.height(10.dp))
 
                 when {
                     state.mazeCompleted -> {

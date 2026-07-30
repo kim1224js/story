@@ -57,16 +57,16 @@ val LocalGameAudioVolume = staticCompositionLocalOf { 1f }
         mutableStateOf(bgmPreferences.getBoolean("bgm_enabled", true))
     }
     var bgmVolume by remember {
-        mutableFloatStateOf(bgmPreferences.getFloat("bgm_volume", 0.35f))
+        mutableFloatStateOf(bgmPreferences.getFloat("bgm_volume", 0.3f))
     }
     var masterVolume by remember {
-        mutableFloatStateOf(bgmPreferences.getFloat("master_volume", 1f))
+        mutableFloatStateOf(bgmPreferences.getFloat("master_volume", 0.3f))
     }
     var gameSoundEnabled by remember {
         mutableStateOf(bgmPreferences.getBoolean("game_sound_enabled", true))
     }
     var gameSoundVolume by remember {
-        mutableFloatStateOf(bgmPreferences.getFloat("game_sound_volume", 0.8f))
+        mutableFloatStateOf(bgmPreferences.getFloat("game_sound_volume", 0.3f))
     }
     var homeBgm by remember { mutableIntStateOf(R.raw.bgm_wandering_woodlands) }
     val savedUser by vm.user.collectAsState()
@@ -343,6 +343,54 @@ private fun AppBackgroundMusic(musicRes: Int, enabled: Boolean, volume: Float) {
                         color = Color(0xFFB88B43).copy(alpha = 0.45f),
                     )
                     Spacer(Modifier.height(20.dp))
+                    if (accountIds.isNotEmpty()) {
+                        Text(
+                            "프로필",
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Color(0xFF315C51),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.ExtraBold,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            accountIds.distinct().forEach { accountId ->
+                                OutlinedButton(
+                                    onClick = {
+                                        id = accountId
+                                        limitError = false
+                                        onLogin(accountId) { success -> limitError = !success }
+                                    },
+                                    shape = RoundedCornerShape(14.dp),
+                                    border = BorderStroke(1.dp, Color(0xFF6B9186)),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = if (normalizedId == accountId) {
+                                            Color(0xFFDCEBE5)
+                                        } else {
+                                            Color.White.copy(alpha = 0.5f)
+                                        },
+                                        contentColor = Color(0xFF315C51),
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 9.dp),
+                                ) {
+                                    Text("👤 $accountId", fontWeight = FontWeight.Bold, maxLines = 1)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(16.dp))
+                        HorizontalDivider(color = Color(0xFFB88B43).copy(alpha = 0.35f))
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            "새 프로필로 시작하기",
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Color(0xFF746142),
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                        Spacer(Modifier.height(7.dp))
+                    }
                     OutlinedTextField(
                         id,
                         {
@@ -366,7 +414,7 @@ private fun AppBackgroundMusic(musicRes: Int, enabled: Boolean, volume: Float) {
                     if ((!canUseAccount && normalizedId.isNotBlank()) || limitError) {
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "로컬 프로필은 최대 3개입니다. 기존 프로필을 선택하거나 다른 캐릭터를 삭제해 주세요.",
+                            "프로필은 최대 3개입니다. 기존 프로필을 선택하거나 다른 캐릭터를 삭제해 주세요.",
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -392,7 +440,7 @@ private fun AppBackgroundMusic(musicRes: Int, enabled: Boolean, volume: Float) {
                     }
                     Spacer(Modifier.height(14.dp))
                     Text(
-                        text = "로컬 프로필은 최대 3개까지 만들 수 있어요",
+                        text = "프로필은 최대 3개까지 만들 수 있어요",
                         color = Color(0xFF746142).copy(alpha = 0.88f),
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = TextAlign.Center,
