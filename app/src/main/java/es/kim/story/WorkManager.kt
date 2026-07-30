@@ -56,10 +56,10 @@ data class WorkState(
 )
 
 val partTimeJobs = listOf(
+    PartTimeJob("walk_kkami", "강아지 산책시키기", 30 * 60 * 1_000L, "30분 · 하루 한 번", 50.0, true),
     PartTimeJob("cafe_4", "영자네 카페 알바", 4 * 60 * 60 * 1_000L, "4시간", 15.0),
     PartTimeJob("cafe_8", "영자네 카페 알바", 8 * 60 * 60 * 1_000L, "8시간", 30.0),
     PartTimeJob("cafe_12", "영자네 카페 알바", 12 * 60 * 60 * 1_000L, "12시간", 45.0),
-    PartTimeJob("walk_kkami", "김은성 산책하기", 30 * 60 * 1_000L, "30분 · 하루 한 번", 50.0, true),
 )
 
 @Singleton

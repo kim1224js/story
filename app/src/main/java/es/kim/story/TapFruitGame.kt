@@ -2,6 +2,7 @@ package es.kim.story
 
 import android.media.AudioManager
 import android.media.ToneGenerator
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -14,6 +15,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -26,7 +28,10 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlin.random.Random
 
 private const val TAP_COLUMNS = 8
@@ -34,7 +39,7 @@ private const val TAP_ROWS = 9
 private const val TAP_TYPES = 6
 private const val TAP_RAINBOW_APPLE = TAP_TYPES
 private const val TAP_EMPTY = -1
-private const val TAP_RAINBOW_CHANCE = 1_000
+private const val TAP_RAINBOW_CHANCE = 100
 
 private enum class TapFruitPhase { Waiting, Countdown, Playing, Finished }
 
@@ -47,6 +52,7 @@ internal fun TapFruitGameView(
 ) {
     var board by remember { mutableStateOf(createTapFruitBoard()) }
     var score by remember { mutableIntStateOf(0) }
+    var comboLevel by remember { mutableIntStateOf(0) }
     var secondsLeft by remember { mutableIntStateOf(60) }
     var countdown by remember { mutableIntStateOf(3) }
     var phase by remember { mutableStateOf(TapFruitPhase.Waiting) }
@@ -71,6 +77,7 @@ internal fun TapFruitGameView(
         secondsLeft = 60
         countdown = 3
         score = 0
+        comboLevel = 0
         board = createTapFruitBoard()
         exploding = emptySet()
         inputLocked = false
@@ -136,10 +143,12 @@ internal fun TapFruitGameView(
         if (phase != TapFruitPhase.Playing || inputLocked || board[index] == TAP_EMPTY) return
         scope.launch {
             inputLocked = true
+            comboLevel = 0
             if (board[index] == TAP_RAINBOW_APPLE) {
                 val targets = board.indices.filter { board[it] != TAP_EMPTY }.toSet()
                 exploding = targets
                 val gained = targets.size
+                comboLevel = 1
                 score += gained
                 message = "🌈 무지개 사과! 전체 폭발 +${gained}점"
                 tones.startTone(ToneGenerator.TONE_PROP_ACK, 700)
@@ -159,16 +168,41 @@ internal fun TapFruitGameView(
             }
 
             exploding = group
+            comboLevel = 1
             val gained = group.size * group.size
             score += gained
             message = "${group.size}개 팡! +${gained}점"
             tones.startTone(ToneGenerator.TONE_PROP_ACK, 180 + group.size.coerceAtMost(8) * 35)
             delay(320)
-            val collapsed = collapseTapFruitBoard(board, group)
-            board = collapsed
+            var collapse = collapseTapFruitBoard(board, group)
+            board = collapse.board
             exploding = emptySet()
             delay(220)
-            refreshIfStuck(collapsed)
+
+            var combo = 2
+            while (phase == TapFruitPhase.Playing) {
+                val chainGroups = findSpawnedTapFruitGroups(collapse.board, collapse.spawned)
+                if (chainGroups.isEmpty()) break
+
+                val chainTargets = chainGroups.flatten().toSet()
+                val chainBaseScore = chainGroups.sumOf { it.size * it.size }
+                val chainScore = chainBaseScore * combo
+                exploding = chainTargets
+                comboLevel = combo
+                score += chainScore
+                message = "${combo} COMBO! ${chainTargets.size}개 연쇄 팡 +${chainScore}점"
+                tones.startTone(
+                    ToneGenerator.TONE_PROP_ACK,
+                    220 + combo.coerceAtMost(8) * 55,
+                )
+                delay(300)
+                collapse = collapseTapFruitBoard(collapse.board, chainTargets)
+                board = collapse.board
+                exploding = emptySet()
+                delay(220)
+                combo++
+            }
+            refreshIfStuck(collapse.board)
         }
     }
 
@@ -195,11 +229,19 @@ internal fun TapFruitGameView(
                     )
                 }
                 Text(
-                    "큰 묶음일수록 점수 증가 · 🌈 무지개 사과 0.1%",
+                    "큰 묶음·연쇄 콤보일수록 점수 증가 · 🌈 무지개 사과 1%",
                     style = MaterialTheme.typography.labelSmall,
                     color = Color(0xFF2E7D32),
                     fontWeight = FontWeight.Bold,
                 )
+                if (comboLevel >= 2) {
+                    Text(
+                        "🔥 ${comboLevel} COMBO!",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = Color(0xFFFF6D00),
+                        fontWeight = FontWeight.Black,
+                    )
+                }
                 Text(
                     message,
                     style = MaterialTheme.typography.bodySmall,
@@ -299,8 +341,17 @@ private fun TapFruitTile(
     onClick: () -> Unit,
 ) {
     val scale by animateFloatAsState(if (exploding) 0.05f else 1f, tween(280), label = "tapFruitScale")
-    Box(
-        modifier.scale(scale).background(
+    val rotation by animateFloatAsState(if (exploding) 18f else 0f, tween(220), label = "tapFruitRotation")
+    val burst = remember { Animatable(0f) }
+    LaunchedEffect(exploding) {
+        if (exploding) {
+            burst.snapTo(0f)
+            burst.animateTo(1f, tween(300))
+        }
+    }
+    Box(modifier) {
+        Box(
+        Modifier.fillMaxSize().rotate(rotation).scale(scale).background(
             if (type == TAP_RAINBOW_APPLE) Color(0xFF37474F) else Color(0xFFFFFDF5),
             RoundedCornerShape(7.dp),
         ).border(
@@ -336,6 +387,35 @@ private fun TapFruitTile(
                 )
             }
         }
+        if (exploding || burst.value > 0f) {
+            Canvas(Modifier.fillMaxSize()) {
+                val progress = burst.value
+                val colors = listOf(
+                    Color(0xFFFFD54F), Color(0xFFFF7043), Color(0xFFEC407A),
+                    Color(0xFF66BB6A), Color(0xFF42A5F5), Color.White,
+                )
+                repeat(12) { index ->
+                    val angle = (PI * 2.0 * index / 12.0).toFloat()
+                    val distance = size.minDimension * (0.12f + 0.48f * progress)
+                    val particleCenter = center.copy(
+                        x = center.x + cos(angle) * distance,
+                        y = center.y + sin(angle) * distance,
+                    )
+                    drawCircle(
+                        color = colors[index % colors.size].copy(alpha = 1f - progress),
+                        radius = size.minDimension * (0.09f * (1f - progress * 0.65f)),
+                        center = particleCenter,
+                    )
+                }
+                drawCircle(
+                    Color.White.copy(alpha = (1f - progress) * 0.85f),
+                    radius = size.minDimension * (0.18f + progress * 0.42f),
+                    center = center,
+                    style = Stroke((3.dp.toPx() * (1f - progress)).coerceAtLeast(0.5f)),
+                )
+            }
+        }
+        }
     }
 }
 
@@ -349,13 +429,14 @@ private data class TapFruitResult(
 private fun createTapFruitBoard(): List<Int> {
     var board: List<Int>
     do {
-        board = List(TAP_COLUMNS * TAP_ROWS) {
-            if (Random.nextInt(TAP_RAINBOW_CHANCE) == 0) TAP_RAINBOW_APPLE
-            else Random.nextInt(TAP_TYPES)
-        }
+        board = List(TAP_COLUMNS * TAP_ROWS) { randomTapFruitType() }
     } while (!hasTapFruitMove(board))
     return board
 }
+
+private fun randomTapFruitType(): Int =
+    if (Random.nextInt(TAP_RAINBOW_CHANCE) == 0) TAP_RAINBOW_APPLE
+    else Random.nextInt(TAP_TYPES)
 
 private fun findTapFruitGroup(board: List<Int>, start: Int): Set<Int> {
     val type = board[start]
@@ -386,8 +467,14 @@ private fun hasTapFruitMove(board: List<Int>): Boolean {
     }
 }
 
-private fun collapseTapFruitBoard(board: List<Int>, removed: Set<Int>): List<Int> {
+private data class TapFruitCollapse(
+    val board: List<Int>,
+    val spawned: Set<Int>,
+)
+
+private fun collapseTapFruitBoard(board: List<Int>, removed: Set<Int>): TapFruitCollapse {
     val next = MutableList(board.size) { TAP_EMPTY }
+    val spawned = mutableSetOf<Int>()
     for (column in 0 until TAP_COLUMNS) {
         val remaining = (TAP_ROWS - 1 downTo 0)
             .map { it * TAP_COLUMNS + column }
@@ -398,6 +485,26 @@ private fun collapseTapFruitBoard(board: List<Int>, removed: Set<Int>): List<Int
             val row = TAP_ROWS - 1 - offset
             next[row * TAP_COLUMNS + column] = type
         }
+        repeat(TAP_ROWS - remaining.size) { row ->
+            val index = row * TAP_COLUMNS + column
+            next[index] = randomTapFruitType()
+            spawned += index
+        }
     }
-    return next
+    return TapFruitCollapse(next, spawned)
+}
+
+private fun findSpawnedTapFruitGroups(
+    board: List<Int>,
+    spawned: Set<Int>,
+): List<Set<Int>> {
+    val checked = mutableSetOf<Int>()
+    return buildList {
+        spawned.forEach { index ->
+            if (index in checked || board[index] == TAP_RAINBOW_APPLE) return@forEach
+            val group = findTapFruitGroup(board, index)
+            checked += group
+            if (group.size >= 2) add(group)
+        }
+    }
 }

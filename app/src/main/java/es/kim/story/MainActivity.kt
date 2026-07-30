@@ -72,10 +72,15 @@ val LocalGameAudioVolume = staticCompositionLocalOf { 1f }
         mutableStateOf(
             AppTtsSettings(
                 enabled = bgmPreferences.getBoolean("tts_enabled", true),
-                guideVoice = bgmPreferences.getString("tts_guide_voice", "").orEmpty(),
-                celebrationVoice = bgmPreferences.getString("tts_celebration_voice", "").orEmpty(),
-                characterVoice = bgmPreferences.getString("tts_character_voice", "").orEmpty(),
-                gameCharacterVoice = bgmPreferences.getString("tts_game_character_voice", "").orEmpty(),
+                voice = bgmPreferences.getString("tts_voice", null)
+                    ?: listOf(
+                        "tts_guide_voice",
+                        "tts_celebration_voice",
+                        "tts_character_voice",
+                        "tts_game_character_voice",
+                    ).firstNotNullOfOrNull { key ->
+                        bgmPreferences.getString(key, null)?.takeIf(String::isNotBlank)
+                    }.orEmpty(),
                 style = runCatching {
                     TtsStyle.valueOf(bgmPreferences.getString("tts_style", TtsStyle.Natural.name).orEmpty())
                 }.getOrDefault(TtsStyle.Natural),
@@ -177,10 +182,7 @@ val LocalGameAudioVolume = staticCompositionLocalOf { 1f }
                     ttsSettings = it
                     bgmPreferences.edit()
                         .putBoolean("tts_enabled", it.enabled)
-                        .putString("tts_guide_voice", it.guideVoice)
-                        .putString("tts_celebration_voice", it.celebrationVoice)
-                        .putString("tts_character_voice", it.characterVoice)
-                        .putString("tts_game_character_voice", it.gameCharacterVoice)
+                        .putString("tts_voice", it.voice)
                         .putString("tts_style", it.style.name)
                         .putFloat("tts_pitch", it.pitch)
                         .putFloat("tts_speed", it.speed)

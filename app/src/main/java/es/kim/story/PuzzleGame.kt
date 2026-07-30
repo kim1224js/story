@@ -45,7 +45,7 @@ import java.util.Locale
 private const val PUZZLE_SIZE = 8
 private const val PUZZLE_TYPES = 6
 private const val RAINBOW_FRUIT = PUZZLE_TYPES
-private const val RAINBOW_FRUIT_CHANCE = 1_000
+private const val RAINBOW_FRUIT_CHANCE = 100
 
 private enum class PuzzlePhase { Waiting, Countdown, Playing, Finished }
 
@@ -61,7 +61,7 @@ internal fun PuzzleView(viewModel: MainViewModel) {
             Tab(
                 selected = selectedGame == 0,
                 onClick = { selectedGame = 0 },
-                text = { Text("과일 교체") },
+                text = { Text("그림 팡") },
             )
             Tab(
                 selected = selectedGame == 1,
@@ -337,7 +337,7 @@ fun PuzzleGameView(
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    "🌈 무지개 과일 등장 확률 0.1% · 누르면 전체 폭발",
+                    "🌈 무지개 과일 등장 확률 1% · 누르면 전체 폭발",
                     style = MaterialTheme.typography.labelSmall,
                     color = Color(0xFF7B1FA2),
                     fontWeight = FontWeight.Bold,

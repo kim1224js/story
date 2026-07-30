@@ -28,10 +28,7 @@ internal enum class TtsStyle(
 
 internal data class AppTtsSettings(
     val enabled: Boolean = true,
-    val guideVoice: String = "",
-    val celebrationVoice: String = "",
-    val characterVoice: String = "",
-    val gameCharacterVoice: String = "",
+    val voice: String = "",
     val style: TtsStyle = TtsStyle.Natural,
     val pitch: Float = 1f,
     val speed: Float = 1f,
@@ -45,12 +42,7 @@ internal fun configureAppTts(
     role: TtsRole,
 ) {
     tts.language = Locale.KOREAN
-    val voiceName = when (role) {
-        TtsRole.Guide -> settings.guideVoice
-        TtsRole.Celebration -> settings.celebrationVoice
-        TtsRole.StoryCharacter -> settings.characterVoice
-        TtsRole.GameCharacter -> settings.gameCharacterVoice
-    }
+    val voiceName = settings.voice
     if (voiceName.isNotBlank()) {
         tts.voices?.firstOrNull { it.name == voiceName }?.let { tts.voice = it }
     }
@@ -94,7 +86,7 @@ internal fun TtsSettingsPanel(
             Column(Modifier.weight(1f)) {
                 Text("TTS 음성", fontWeight = FontWeight.ExtraBold)
                 Text(
-                    "안내·축하·캐릭터 목소리를 따로 설정해요",
+                    "스타일 버튼으로 목소리·음높이·속도를 함께 적용해요",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -105,36 +97,18 @@ internal fun TtsSettingsPanel(
         }
 
         if (settings.enabled) {
-            TtsVoiceSelector("안내 음성", settings.guideVoice, voices, ready) { voice ->
-                val next = settings.copy(guideVoice = voice)
-                onSettingsChange(next)
-                previewTts(engine, next, TtsRole.Guide, "게임 안내 음성입니다.")
-            }
-            TtsVoiceSelector("축하 음성", settings.celebrationVoice, voices, ready) { voice ->
-                val next = settings.copy(celebrationVoice = voice)
-                onSettingsChange(next)
-                previewTts(engine, next, TtsRole.Celebration, "축하합니다! 멋진 기록이에요.")
-            }
-            TtsVoiceSelector("스토리 캐릭터 음성", settings.characterVoice, voices, ready) { voice ->
-                val next = settings.copy(characterVoice = voice)
-                onSettingsChange(next)
-                previewTts(engine, next, TtsRole.StoryCharacter, "안녕하세요. 앞으로 함께 여행해요.")
-            }
-            TtsVoiceSelector("미니게임 캐릭터 음성", settings.gameCharacterVoice, voices, ready) { voice ->
-                val next = settings.copy(gameCharacterVoice = voice)
-                onSettingsChange(next)
-                previewTts(engine, next, TtsRole.GameCharacter, "미니게임 캐릭터 목소리예요.")
-            }
-
             Text("목소리 스타일", fontWeight = FontWeight.Bold)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 TtsStyle.entries.forEach { style ->
                     FilterChip(
                         selected = settings.style == style,
                         onClick = {
-                            val next = settings.copy(style = style)
+                            val next = settings.copy(
+                                voice = voiceForStyle(style, voices),
+                                style = style,
+                            )
                             onSettingsChange(next)
-                            previewTts(engine, next, TtsRole.StoryCharacter, "${style.label} 목소리입니다.")
+                            previewTts(engine, next, TtsRole.Guide, "${style.label} 목소리를 적용했습니다.")
                         },
                         label = { Text(style.label) },
                     )
@@ -148,12 +122,12 @@ internal fun TtsSettingsPanel(
             }
             Button(
                 onClick = {
-                    previewTts(engine, settings, TtsRole.StoryCharacter, "선택한 목소리의 미리듣기입니다.")
+                    previewTts(engine, settings, TtsRole.Guide, "선택한 목소리와 스타일의 미리듣기입니다.")
                 },
                 enabled = ready,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("▶ 선택한 캐릭터 음성 미리듣기")
+                Text("▶ 선택한 목소리 미리듣기")
             }
             Text(
                 if (voices.isEmpty()) {
@@ -164,46 +138,6 @@ internal fun TtsSettingsPanel(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        }
-    }
-}
-
-@Composable
-private fun TtsVoiceSelector(
-    title: String,
-    selectedName: String,
-    voices: List<Voice>,
-    ready: Boolean,
-    onSelected: (String) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Column {
-        Text(title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-        Box {
-            OutlinedButton(
-                onClick = { expanded = true },
-                enabled = ready,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                val selected = voices.firstOrNull { it.name == selectedName }
-                Text(
-                    selected?.let(::voiceLabel) ?: "기기 기본 음성",
-                    modifier = Modifier.weight(1f),
-                )
-                Text("▼")
-            }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                DropdownMenuItem(
-                    text = { Text("기기 기본 음성") },
-                    onClick = { expanded = false; onSelected("") },
-                )
-                voices.forEach { voice ->
-                    DropdownMenuItem(
-                        text = { Text(voiceLabel(voice)) },
-                        onClick = { expanded = false; onSelected(voice.name) },
-                    )
-                }
-            }
         }
     }
 }
@@ -222,10 +156,8 @@ private fun TtsSlider(
     }
 }
 
-private fun voiceLabel(voice: Voice): String {
-    val quality = if (voice.isNetworkConnectionRequired) "온라인" else "기기"
-    return "${voice.name.substringAfterLast('#').takeLast(24)} · $quality"
-}
+private fun voiceForStyle(style: TtsStyle, voices: List<Voice>): String =
+    voices.getOrNull(style.ordinal % voices.size.coerceAtLeast(1))?.name.orEmpty()
 
 private fun previewTts(
     engine: TextToSpeech?,
