@@ -52,12 +52,34 @@ data class StockNews(
     val slot: Long,
 )
 
+data class StockReconnectChange(
+    val stockId: String,
+    val stockName: String,
+    val quantity: Int,
+    val previousPrice: Long,
+    val currentPrice: Long,
+) {
+    val valueChange: Long
+        get() = (currentPrice - previousPrice) * quantity.toLong()
+
+    val changePercent: Double
+        get() = if (previousPrice > 0L) {
+            (currentPrice - previousPrice) * 100.0 / previousPrice
+        } else {
+            0.0
+        }
+}
+
 data class StockState(
     val quotes: List<StockQuote> = emptyList(),
     val holdings: List<StockHolding> = emptyList(),
     val news: List<StockNews> = emptyList(),
     val pendingBreakingNews: List<StockNews> = emptyList(),
     val realizedProfitByStock: Map<String, Long> = emptyMap(),
+    val reconnectChanges: List<StockReconnectChange> = emptyList(),
+    val elapsedMarketSlots: Long = 0L,
+    val marketTrendDirection: Int = 0,
+    val marketTrendRemainingMinutes: Int = 0,
     val marketOpen: Boolean = false,
     val lastUpdatedText: String = "",
 )
@@ -84,17 +106,26 @@ class StockManager @Inject constructor(@ApplicationContext context: Context) {
     private var chapter = 1
 
     fun selectAccount(userId: String, chapter: Int) {
+        if (accountId != userId) {
+            _state.value = StockState()
+        }
         accountId = userId
         this.chapter = chapter.coerceAtLeast(1)
-        refresh(checkBreaking = true)
+        refresh(checkBreaking = true, captureReconnectChanges = true)
     }
 
-    fun refresh(checkBreaking: Boolean = false, now: LocalDateTime = LocalDateTime.now()) {
+    @Synchronized
+    fun refresh(
+        checkBreaking: Boolean = false,
+        captureReconnectChanges: Boolean = false,
+        now: LocalDateTime = LocalDateTime.now(),
+    ) {
         if (accountId.isBlank()) return
         chapter = chapter.coerceAtLeast(1)
         val slot = marketSlot(now)
-        val quotes = virtualStocks.map { quoteFor(it, slot, chapter) }
         val holdings = loadHoldings()
+        val priceUpdate = updatePersistedPrices(slot, holdings, captureReconnectChanges)
+        val quotes = priceUpdate.quotes
         val news = quotes.map { newsFor(it, slot) }.sortedByDescending(StockNews::slot)
         val acknowledged = prefs.getLong(key("breaking_ack_slot"), slot - 192L)
         val pending = if (checkBreaking && holdings.isNotEmpty()) {
@@ -108,12 +139,29 @@ class StockManager @Inject constructor(@ApplicationContext context: Context) {
             _state.value.pendingBreakingNews
         }
         val marketOpen = isMarketOpen(now)
+        val marketTrend = marketTrendDirection(slot)
         _state.value = StockState(
             quotes = quotes,
             holdings = holdings,
             news = news,
             pendingBreakingNews = pending,
             realizedProfitByStock = loadRealizedProfits(),
+            reconnectChanges = if (captureReconnectChanges && priceUpdate.elapsedSlots > 0L) {
+                priceUpdate.reconnectChanges
+            } else {
+                _state.value.reconnectChanges
+            },
+            elapsedMarketSlots = if (captureReconnectChanges && priceUpdate.elapsedSlots > 0L) {
+                priceUpdate.elapsedSlots
+            } else {
+                _state.value.elapsedMarketSlots
+            },
+            marketTrendDirection = marketTrend,
+            marketTrendRemainingMinutes = if (marketTrend == 0) {
+                0
+            } else {
+                ((12L - slot % 12L) * 5L).toInt()
+            },
             marketOpen = marketOpen,
             lastUpdatedText = slotText(now, marketOpen),
         )
@@ -121,6 +169,7 @@ class StockManager @Inject constructor(@ApplicationContext context: Context) {
 
     fun buy(stockId: String, expectedPrice: Long, quantity: Int): Boolean {
         if (quantity <= 0) return false
+        refresh()
         val quote = _state.value.quotes.firstOrNull { it.stock.id == stockId } ?: return false
         if (!isMarketOpen(LocalDateTime.now()) || quote.price != expectedPrice) return false
         val holdings = loadHoldings().toMutableList()
@@ -140,6 +189,7 @@ class StockManager @Inject constructor(@ApplicationContext context: Context) {
         return true
     }
     fun sell(stockId: String, sellAll: Boolean): StockSaleResult? {
+        refresh()
         if (!isMarketOpen(LocalDateTime.now())) return null
         val quote = _state.value.quotes.firstOrNull { it.stock.id == stockId } ?: return null
         val holdings = loadHoldings().toMutableList()
@@ -174,6 +224,13 @@ class StockManager @Inject constructor(@ApplicationContext context: Context) {
         _state.value = _state.value.copy(pendingBreakingNews = emptyList())
     }
 
+    fun acknowledgeReconnectChanges() {
+        _state.value = _state.value.copy(
+            reconnectChanges = emptyList(),
+            elapsedMarketSlots = 0L,
+        )
+    }
+
     private fun loadHoldings(): List<StockHolding> = virtualStocks.mapNotNull { stock ->
         val quantity = prefs.getInt(key("holding_${stock.id}_quantity"), 0)
         if (quantity <= 0) null else StockHolding(
@@ -197,7 +254,141 @@ class StockManager @Inject constructor(@ApplicationContext context: Context) {
         editor.apply()
     }
 
+    private fun updatePersistedPrices(
+        targetSlot: Long,
+        holdings: List<StockHolding>,
+        captureReconnectChanges: Boolean,
+    ): PersistedPriceUpdate {
+        val lastSlotKey = key("price_last_slot")
+        val savedSlot = prefs.getLong(lastSlotKey, Long.MIN_VALUE)
+
+        if (savedSlot == Long.MIN_VALUE) {
+            val quotes = virtualStocks.map { quoteFor(it, targetSlot, chapter) }
+            val editor = prefs.edit().putLong(lastSlotKey, targetSlot)
+            quotes.forEach { quote ->
+                editor.putLong(key("price_${quote.stock.id}"), quote.price)
+                editor.putLong(key("previous_price_${quote.stock.id}"), quote.previousPrice)
+            }
+            editor.commit()
+            return PersistedPriceUpdate(quotes, emptyList(), 0L)
+        }
+
+        val savedPrices = virtualStocks.associateWith { stock ->
+            prefs.getLong(
+                key("price_${stock.id}"),
+                quoteFor(stock, savedSlot, chapter).price,
+            )
+        }
+        val savedPreviousPrices = virtualStocks.associateWith { stock ->
+            prefs.getLong(
+                key("previous_price_${stock.id}"),
+                quoteFor(stock, savedSlot - 1, chapter).price,
+            )
+        }
+
+        if (targetSlot <= savedSlot) {
+            return PersistedPriceUpdate(
+                quotes = virtualStocks.map { stock ->
+                    persistedQuote(stock, savedPrices.getValue(stock), savedPreviousPrices.getValue(stock))
+                },
+                reconnectChanges = emptyList(),
+                elapsedSlots = 0L,
+            )
+        }
+
+        val elapsedSlots = targetSlot - savedSlot
+        val currentPrices = savedPrices.toMutableMap()
+        val previousPrices = savedPreviousPrices.toMutableMap()
+        for (candidateSlot in (savedSlot + 1)..targetSlot) {
+            virtualStocks.forEach { stock ->
+                val oldPrice = currentPrices.getValue(stock)
+                previousPrices[stock] = oldPrice
+                currentPrices[stock] = nextStockPrice(
+                    stock = stock,
+                    previousPrice = oldPrice,
+                    slot = candidateSlot,
+                    chapter = chapter,
+                    accountSeed = accountId.hashCode().toLong(),
+                )
+            }
+        }
+
+        val editor = prefs.edit().putLong(lastSlotKey, targetSlot)
+        virtualStocks.forEach { stock ->
+            editor.putLong(key("price_${stock.id}"), currentPrices.getValue(stock))
+            editor.putLong(key("previous_price_${stock.id}"), previousPrices.getValue(stock))
+        }
+        editor.commit()
+
+        val changes = if (captureReconnectChanges) {
+            holdings.mapNotNull { holding ->
+                val stock = virtualStocks.firstOrNull { it.id == holding.stockId } ?: return@mapNotNull null
+                val before = savedPrices.getValue(stock)
+                val after = currentPrices.getValue(stock)
+                if (before == after) null else StockReconnectChange(
+                    stockId = stock.id,
+                    stockName = stock.name,
+                    quantity = holding.quantity,
+                    previousPrice = before,
+                    currentPrice = after,
+                )
+            }
+        } else {
+            emptyList()
+        }
+
+        return PersistedPriceUpdate(
+            quotes = virtualStocks.map { stock ->
+                persistedQuote(stock, currentPrices.getValue(stock), previousPrices.getValue(stock))
+            },
+            reconnectChanges = changes,
+            elapsedSlots = elapsedSlots,
+        )
+    }
+
     private fun key(name: String) = "$accountId|$name"
+}
+
+private data class PersistedPriceUpdate(
+    val quotes: List<StockQuote>,
+    val reconnectChanges: List<StockReconnectChange>,
+    val elapsedSlots: Long,
+)
+
+private fun persistedQuote(stock: StockDefinition, price: Long, previousPrice: Long): StockQuote {
+    val change = if (previousPrice > 0L) {
+        (price - previousPrice) * 100.0 / previousPrice
+    } else {
+        0.0
+    }
+    return StockQuote(stock, price, previousPrice, change)
+}
+
+private fun nextStockPrice(
+    stock: StockDefinition,
+    previousPrice: Long,
+    slot: Long,
+    chapter: Int,
+    accountSeed: Long,
+): Long {
+    val stageValue = stageClearCost(chapter).coerceAtLeast(10_000L)
+    val base = (stageValue * stock.priceRatio).roundToLong().coerceIn(1_000L, 8_000_000L)
+    val meanReversion = ((base - previousPrice) * 100.0 / previousPrice)
+        .coerceIn(-0.25, 0.25)
+    val circuit = circuitDirection(stock.id, slot)
+    val marketTrend = marketTrendDirection(slot)
+    val movement = when {
+        marketTrend != 0 -> {
+            val strength = 0.25 +
+                seededUnit(stock.id.hashCode().toLong() xor 0x4D41_524BL, slot) * 0.55
+            marketTrend * strength
+        }
+        circuit != 0.0 -> circuit
+        else -> stockMovement(stock, slot, accountSeed) + meanReversion
+    }
+    return (previousPrice * (1.0 + movement / 100.0))
+        .roundToLong()
+        .coerceIn(100L, 80_000_000L)
 }
 
 private fun quoteFor(stock: StockDefinition, slot: Long, chapter: Int): StockQuote {
@@ -220,8 +411,8 @@ private fun stockPriceForSlot(stock: StockDefinition, slot: Long, base: Long): L
         (regularPrice(slot - 1) * (1.0 + circuit / 100.0)).roundToLong().coerceAtLeast(100L)
     }
 }
-private fun stockMovement(stock: StockDefinition, slot: Long): Double {
-    val random = seededUnit(stock.id.hashCode().toLong(), slot)
+private fun stockMovement(stock: StockDefinition, slot: Long, accountSeed: Long = 0L): Double {
+    val random = seededUnit(stock.id.hashCode().toLong() xor accountSeed, slot)
     val normal = (random * 2.0 - 1.0) * stock.volatility
     val breaking = breakingDirection(stock.id, slot)
     return (normal + breaking).coerceIn(-7.0, 7.0)
@@ -353,6 +544,17 @@ private fun circuitDirection(stockId: String, slot: Long): Double {
     val rising = seededUnit(stockId.hashCode().toLong() xor 0x72A1_55L, slot) >= 0.5
     return if (rising) 20.0 else -20.0
 }
+
+private fun marketTrendDirection(slot: Long): Int {
+    val hourBlock = slot / 12L
+    val chance = (seededUnit(0x4D41_524B_4554L, hourBlock) * 1_000).toInt()
+    return when (chance) {
+        in 0..19 -> 1
+        in 20..39 -> -1
+        else -> 0
+    }
+}
+
 private fun breakingDirection(stockId: String, slot: Long): Double {
     val chance = (seededUnit(stockId.hashCode().toLong() xor 0x5A17L, slot) * 1_000).toInt()
     if (chance >= 10) return 0.0

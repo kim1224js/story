@@ -37,8 +37,13 @@ import javax.inject.Inject
             }
         }
     }
-    fun refreshStocks() = stockManager.refresh()
+    fun refreshStocks(checkReconnect: Boolean = false) =
+        stockManager.refresh(
+            checkBreaking = checkReconnect,
+            captureReconnectChanges = checkReconnect,
+        )
     fun acknowledgeStockBreakingNews() = stockManager.acknowledgeBreakingNews()
+    fun acknowledgeStockReconnectChanges() = stockManager.acknowledgeReconnectChanges()
     fun buyStock(stockId: String, price: Long, quantity: Int, onResult: (Boolean) -> Unit = {}) {
         if (price <= 0L || quantity <= 0) return onResult(false)
         val totalCost = runCatching { Math.multiplyExact(price, quantity.toLong()) }

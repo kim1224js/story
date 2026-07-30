@@ -12,6 +12,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 import java.time.LocalDateTime
 import java.util.Locale
@@ -23,13 +26,25 @@ internal fun StockView(viewModel: MainViewModel) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var notice by remember { mutableStateOf<String?>(null) }
     var saleResult by remember { mutableStateOf<StockSaleResult?>(null) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshStocks(checkReconnect = true)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     LaunchedEffect(Unit) {
+        viewModel.refreshStocks(checkReconnect = true)
         while (true) {
-            viewModel.refreshStocks()
             val now = LocalDateTime.now()
             val secondsUntilNextSlot = (5 - now.minute % 5) * 60L - now.second
             delay(secondsUntilNextSlot.coerceAtLeast(5L) * 1_000L)
+            viewModel.refreshStocks()
         }
     }
 
@@ -50,9 +65,40 @@ internal fun StockView(viewModel: MainViewModel) {
                     style = MaterialTheme.typography.labelMedium)
                 Text(state.lastUpdatedText, style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (state.marketTrendDirection != 0) {
+                    Spacer(Modifier.height(6.dp))
+                    Surface(
+                        color = if (state.marketTrendDirection > 0) {
+                            Color(0xFFFFEBEE)
+                        } else {
+                            Color(0xFFE3F2FD)
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                    ) {
+                        Text(
+                            text = if (state.marketTrendDirection > 0) {
+                                "📈 시장 전체 상승 이벤트 · 약 ${state.marketTrendRemainingMinutes}분 남음"
+                            } else {
+                                "📉 시장 전체 하락 이벤트 · 약 ${state.marketTrendRemainingMinutes}분 남음"
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 7.dp),
+                            color = stockChangeColor(state.marketTrendDirection.toDouble()),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.ExtraBold,
+                        )
+                    }
+                }
             }
         }
         Spacer(Modifier.height(8.dp))
+        if (state.reconnectChanges.isNotEmpty()) {
+            ReconnectChangeCard(
+                changes = state.reconnectChanges,
+                elapsedSlots = state.elapsedMarketSlots,
+                onDismiss = viewModel::acknowledgeStockReconnectChanges,
+            )
+            Spacer(Modifier.height(8.dp))
+        }
         PrimaryTabRow(selectedTabIndex = selectedTab) {
             Tab(selectedTab == 0, { selectedTab = 0 }, text = { Text("내 주식목록") })
             Tab(selectedTab == 1, { selectedTab = 1 }, text = { Text("호가") })
@@ -134,16 +180,130 @@ internal fun StockView(viewModel: MainViewModel) {
     }}
 
 @Composable
+private fun ReconnectChangeCard(
+    changes: List<StockReconnectChange>,
+    elapsedSlots: Long,
+    onDismiss: () -> Unit,
+) {
+    val totalChange = changes.sumOf(StockReconnectChange::valueChange)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1)),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("자리를 비운 동안", fontWeight = FontWeight.ExtraBold)
+                    Text(
+                        "${elapsedSlots * 5}분 동안 보유 주식 가치가 " +
+                            "${if (totalChange >= 0L) "+" else ""}${stockWon(totalChange)} 변동했어요.",
+                        color = stockChangeColor(totalChange.toDouble()),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                TextButton(onClick = onDismiss) { Text("확인") }
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            changes.forEach { change ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text("${change.stockName} · ${change.quantity}주")
+                    Text(
+                        "${if (change.valueChange >= 0L) "+" else ""}${stockWon(change.valueChange)} " +
+                            "(${"%+.2f".format(Locale.KOREAN, change.changePercent)}%)",
+                        color = stockChangeColor(change.valueChange.toDouble()),
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun PortfolioList(state: StockState, modifier: Modifier = Modifier) {
     val holdings = state.holdings.filter { it.quantity > 0 }
+    var sortOrder by remember { mutableStateOf(PortfolioSortOrder.Value) }
     if (holdings.isEmpty()) {
         Box(modifier, contentAlignment = Alignment.Center) {
             Text("보유 중인 주식이 없습니다.\n호가 탭에서 1주씩 매수할 수 있어요.", textAlign = TextAlign.Center)
         }
         return
     }
+    val totalCost = holdings.sumOf { holding ->
+        holding.averagePrice * holding.quantity.toLong()
+    }
+    val totalValue = holdings.sumOf { holding ->
+        val currentPrice = state.quotes.firstOrNull { it.stock.id == holding.stockId }?.price ?: 0L
+        currentPrice * holding.quantity.toLong()
+    }
+    val totalProfit = totalValue - totalCost
+    val totalProfitPercent = if (totalCost > 0L) {
+        totalProfit * 100.0 / totalCost
+    } else {
+        0.0
+    }
+    val sortedHoldings = holdings.sortedWith(
+        when (sortOrder) {
+            PortfolioSortOrder.Value -> compareByDescending<StockHolding> { holding ->
+                val price = state.quotes.firstOrNull { it.stock.id == holding.stockId }?.price ?: 0L
+                price * holding.quantity.toLong()
+            }.thenBy(StockHolding::stockId)
+            PortfolioSortOrder.ProfitRate -> compareByDescending<StockHolding> { holding ->
+                val price = state.quotes.firstOrNull { it.stock.id == holding.stockId }?.price ?: 0L
+                if (holding.averagePrice > 0L) {
+                    (price - holding.averagePrice) * 100.0 / holding.averagePrice
+                } else {
+                    0.0
+                }
+            }.thenBy(StockHolding::stockId)
+        },
+    )
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(holdings, key = StockHolding::stockId) { holding ->
+        item(key = "portfolio_sort") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(
+                    selected = sortOrder == PortfolioSortOrder.Value,
+                    onClick = { sortOrder = PortfolioSortOrder.Value },
+                    label = { Text("평가금순") },
+                )
+                FilterChip(
+                    selected = sortOrder == PortfolioSortOrder.ProfitRate,
+                    onClick = { sortOrder = PortfolioSortOrder.ProfitRate },
+                    label = { Text("수익률순") },
+                )
+            }
+        }
+        item(key = "portfolio_return_summary") {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("현재 보유 주식 수익률", fontWeight = FontWeight.ExtraBold)
+                Text(
+                    "${if (totalProfit >= 0L) "+" else ""}${stockWon(totalProfit)} " +
+                        "(${"%+.2f".format(Locale.KOREAN, totalProfitPercent)}%)",
+                    color = stockChangeColor(totalProfit.toDouble()),
+                    fontWeight = FontWeight.Black,
+                )
+            }
+        }
+        items(sortedHoldings, key = StockHolding::stockId) { holding ->
             val quote = state.quotes.firstOrNull { it.stock.id == holding.stockId } ?: return@items
             val value = quote.price * holding.quantity
             val cost = holding.averagePrice * holding.quantity
@@ -164,6 +324,11 @@ private fun PortfolioList(state: StockState, modifier: Modifier = Modifier) {
             }
         }
     }
+}
+
+private enum class PortfolioSortOrder {
+    Value,
+    ProfitRate,
 }
 
 @Composable

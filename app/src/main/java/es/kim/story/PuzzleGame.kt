@@ -1,6 +1,7 @@
 package es.kim.story
 
 import android.media.AudioManager
+import android.media.SoundPool
 import android.media.ToneGenerator
 import android.speech.tts.TextToSpeech
 import androidx.compose.animation.core.Animatable
@@ -125,8 +126,13 @@ fun PuzzleGameView(
     val tones = remember(gameAudioVolume) {
         ToneGenerator(AudioManager.STREAM_MUSIC, (gameAudioVolume * 100).roundToInt())
     }
+    val comboSoundPool = remember { SoundPool.Builder().setMaxStreams(2).build() }
+    val comboSound = remember(comboSoundPool) {
+        comboSoundPool.load(context, R.raw.sfx_puzzle_combo, 1)
+    }
 
     DisposableEffect(tones) { onDispose { tones.release() } }
+    DisposableEffect(comboSoundPool) { onDispose { comboSoundPool.release() } }
     DisposableEffect(context) {
         val engine = TextToSpeech(context.applicationContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
@@ -290,10 +296,20 @@ fun PuzzleGameView(
                 } else {
                     "팡! +${gained}점"
                 }
-                tones.startTone(
-                    if (cascade > 1) ToneGenerator.TONE_PROP_ACK else ToneGenerator.TONE_PROP_PROMPT,
-                    180 + cascade.coerceAtMost(4) * 50,
-                )
+                if (cascade > 1) {
+                    val comboPitch = (1f + (cascade - 2).coerceAtMost(6) * 0.08f)
+                        .coerceAtMost(1.48f)
+                    comboSoundPool.play(
+                        comboSound,
+                        gameAudioVolume,
+                        gameAudioVolume,
+                        2,
+                        0,
+                        comboPitch,
+                    )
+                } else {
+                    tones.startTone(ToneGenerator.TONE_PROP_PROMPT, 230)
+                }
                 delay(280)
                 current = collapsePuzzleMatches(current, matches)
                 board = current
