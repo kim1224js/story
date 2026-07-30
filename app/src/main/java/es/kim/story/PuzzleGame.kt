@@ -44,9 +44,49 @@ import java.util.Locale
 
 private const val PUZZLE_SIZE = 8
 private const val PUZZLE_TYPES = 6
+private const val RAINBOW_FRUIT = PUZZLE_TYPES
+private const val RAINBOW_FRUIT_CHANCE = 1_000
 
 private enum class PuzzlePhase { Waiting, Countdown, Playing, Finished }
 
+@Composable
+internal fun PuzzleView(viewModel: MainViewModel) {
+    val state by viewModel.workState.collectAsState()
+    val user by viewModel.user.collectAsState()
+    val clearReward = stageClearCost(user?.chapter ?: 1)
+    var selectedGame by remember { mutableIntStateOf(0) }
+
+    Page(backgroundRes = R.drawable.work_background, backgroundAlpha = 0.5f) {
+        PrimaryTabRow(selectedTabIndex = selectedGame) {
+            Tab(
+                selected = selectedGame == 0,
+                onClick = { selectedGame = 0 },
+                text = { Text("과일 교체") },
+            )
+            Tab(
+                selected = selectedGame == 1,
+                onClick = { selectedGame = 1 },
+                text = { Text("과일 팡") },
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        if (selectedGame == 0) {
+            PuzzleGameView(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                clearReward = clearReward,
+                bestScore = state.puzzleBestScore,
+                onReward = { score -> viewModel.claimPuzzleReward(score, clearReward) },
+            )
+        } else {
+            TapFruitGameView(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                clearReward = clearReward,
+                bestScore = state.puzzleBestScore,
+                onReward = { score -> viewModel.claimPuzzleReward(score, clearReward) },
+            )
+        }
+    }
+}
 @Composable
 fun PuzzleGameView(
     modifier: Modifier = Modifier,
@@ -57,7 +97,7 @@ fun PuzzleGameView(
     var board by remember { mutableStateOf(createPuzzleBoard()) }
     var selected by remember { mutableStateOf<Int?>(null) }
     var score by remember { mutableIntStateOf(0) }
-    var secondsLeft by remember { mutableIntStateOf(30) }
+    var secondsLeft by remember { mutableIntStateOf(60) }
     var gameRound by remember { mutableIntStateOf(0) }
     var countdown by remember { mutableIntStateOf(3) }
     var gamePhase by remember { mutableStateOf(PuzzlePhase.Waiting) }
@@ -65,6 +105,8 @@ fun PuzzleGameView(
     var rewardClaimed by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<PuzzleResult?>(null) }
     var comboMessage by remember { mutableStateOf("인접한 블록 두 개를 눌러 바꿔보세요") }
+    var comboCount by remember { mutableIntStateOf(0) }
+    var maxCombo by remember { mutableIntStateOf(0) }
     var swapPair by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var exploding by remember { mutableStateOf(emptySet<Int>()) }
     var wrongTiles by remember { mutableStateOf(emptySet<Int>()) }
@@ -72,6 +114,7 @@ fun PuzzleGameView(
     val spriteSheet = ImageBitmap.imageResource(R.drawable.puzzle_tiles)
     val context = LocalContext.current
     val gameAudioVolume = LocalGameAudioVolume.current
+    val ttsSettings = LocalTtsSettings.current
     var tts by remember { mutableStateOf<TextToSpeech?>(null) }
     var ttsReady by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -85,8 +128,7 @@ fun PuzzleGameView(
         val engine = TextToSpeech(context.applicationContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale.KOREAN
-                tts?.setPitch(1.15f)
-                tts?.setSpeechRate(1.05f)
+                tts?.let { configureAppTts(it, ttsSettings, TtsRole.Celebration) }
                 ttsReady = true
             }
         }
@@ -102,7 +144,7 @@ fun PuzzleGameView(
     LaunchedEffect(gameRound) {
         if (gameRound == 0) return@LaunchedEffect
         puzzleScrollState.animateScrollTo(0)
-        secondsLeft = 30
+        secondsLeft = 60
         countdown = 3
         gamePhase = PuzzlePhase.Countdown
         timeExpired = false
@@ -123,6 +165,7 @@ fun PuzzleGameView(
         gamePhase = PuzzlePhase.Finished
         timeExpired = true
         selected = null
+        comboCount = 0
         comboMessage = "시간 종료! 연쇄 처리가 끝나면 보상이 지급돼요"
         tones.startTone(ToneGenerator.TONE_PROP_NACK, 450)
     }
@@ -137,8 +180,9 @@ fun PuzzleGameView(
             onReward(score)
             comboMessage = "최종 $score 점 · ${formatPuzzleWon(earnedMoney)} 획득"
             tones.startTone(ToneGenerator.TONE_PROP_ACK, 600)
-            if (ttsReady && gameAudioVolume > 0f) {
+            if (ttsReady && gameAudioVolume > 0f && ttsSettings.enabled) {
                 val recordMessage = if (isNewBest) "새로운 최고 기록입니다!" else "수고하셨습니다!"
+                tts?.let { configureAppTts(it, ttsSettings, TtsRole.Celebration) }
                 tts?.speak(
                     "축하합니다! 최종 점수 ${score}점, ${formatPuzzleWon(earnedMoney)}을 획득했습니다. $recordMessage",
                     TextToSpeech.QUEUE_FLUSH,
@@ -155,11 +199,31 @@ fun PuzzleGameView(
         board = createPuzzleBoard()
         selected = null
         score = 0
+        comboCount = 0
+        maxCombo = 0
         gameRound += 1
     }
 
     fun selectTile(index: Int) {
         if (gamePhase != PuzzlePhase.Playing || inputLocked) return
+        if (board[index] == RAINBOW_FRUIT) {
+            scope.launch {
+                inputLocked = true
+                selected = null
+                comboCount = 1
+                maxCombo = maxOf(maxCombo, comboCount)
+                val cleared = board.indices.toSet()
+                exploding = cleared
+                comboMessage = "🌈 무지개 ! 전체 폭발 +${cleared.size}점"
+                tones.startTone(ToneGenerator.TONE_PROP_ACK, 700)
+                delay(650)
+                score += cleared.size
+                board = createPuzzleBoard()
+                exploding = emptySet()
+                inputLocked = false
+            }
+            return
+        }
         val first = selected
         if (first == null) {
             selected = index
@@ -181,6 +245,7 @@ fun PuzzleGameView(
         scope.launch {
             inputLocked = true
             selected = null
+            comboCount = 0
             swapPair = first to index
             tones.startTone(ToneGenerator.TONE_PROP_BEEP2, 120)
             delay(210)
@@ -210,10 +275,18 @@ fun PuzzleGameView(
             var matches = firstMatches
             while (matches.isNotEmpty()) {
                 cascade += 1
+                comboCount = cascade
+                maxCombo = maxOf(maxCombo, cascade)
                 exploding = matches
-                val gained = matches.size * cascade
+                val baseScore = matches.size
+                val comboBonus = matches.size * (cascade - 1)
+                val gained = baseScore + comboBonus
                 earned += gained
-                comboMessage = if (cascade > 1) "${cascade}연쇄! +${gained}점" else "팡! +${gained}점"
+                comboMessage = if (cascade > 1) {
+                    "${cascade}콤보! 기본 +${baseScore} · 연쇄 보너스 +${comboBonus}"
+                } else {
+                    "팡! +${gained}점"
+                }
                 tones.startTone(
                     if (cascade > 1) ToneGenerator.TONE_PROP_ACK else ToneGenerator.TONE_PROP_PROMPT,
                     180 + cascade.coerceAtMost(4) * 50,
@@ -226,7 +299,7 @@ fun PuzzleGameView(
                 matches = findPuzzleMatches(current)
             }
             score += earned
-            if (cascade > 1) comboMessage = "${cascade}연쇄 성공! 총 +${earned}점"
+            if (cascade > 1) comboMessage = "${cascade}콤보 성공! 총 +${earned}점"
             inputLocked = false
         }
     }
@@ -249,9 +322,26 @@ fun PuzzleGameView(
             Column(Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     Text("점수 $score", fontWeight = FontWeight.Bold)
+                    Text(
+                        "콤보 ×$comboCount",
+                        fontWeight = FontWeight.ExtraBold,
+                        color = if (comboCount >= 2) Color(0xFFE65100) else Color(0xFF6D4C41),
+                    )
                     Text("남은 시간 ${secondsLeft}초", fontWeight = FontWeight.Bold,
                         color = if (secondsLeft <= 5) Color(0xFFC62828) else Color.Unspecified)
                 }
+                Text(
+                    "이번 게임 최고 콤보 ×$maxCombo",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF7B1FA2),
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    "🌈 무지개 과일 등장 확률 0.1% · 누르면 전체 폭발",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF7B1FA2),
+                    fontWeight = FontWeight.Bold,
+                )
                 Text("1점당 ${formatPuzzleWon(stageCostPercentReward(clearReward, 0.02))} · 최대 ${formatPuzzleWon(stageCostPercentReward(clearReward, 10.0))}",
                     style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32),
                     fontWeight = FontWeight.Bold)
@@ -335,7 +425,7 @@ fun PuzzleGameView(
                             PuzzlePhase.Waiting -> "퍼즐 시작"
                             PuzzlePhase.Countdown -> "${countdown.coerceAtLeast(1)}초 후 시작"
                             PuzzlePhase.Playing -> "게임 진행 중"
-                            PuzzlePhase.Finished -> "30초 다시 시작"
+                            PuzzlePhase.Finished -> "60초 다시 시작"
                         },
                     )
                 }
@@ -419,19 +509,66 @@ private fun PuzzleTile(
             .zIndex(if (swapX != 0.dp || swapY != 0.dp) 2f else 0f)
             .clickable(enabled = !exploding, onClick = onClick)
             .rotate(shake.value).scale(tileScale * appearScale.value)
-            .background(if (selected) Color.White else Color(0xFFFFFAEE), RoundedCornerShape(9.dp))
-            .border(if (selected) 3.dp else 1.dp,
-                if (wrong) Color(0xFFE53935) else if (selected) Color(0xFFFF8F00) else Color(0x33A66A20),
+            .background(
+                when {
+                    selected -> Color.White
+                    type == RAINBOW_FRUIT -> Color(0xFF455A64)
+                    else -> Color(0xFFFFFAEE)
+                },
+                RoundedCornerShape(9.dp),
+            )
+            .border(if (selected || type == RAINBOW_FRUIT) 3.dp else 1.dp,
+                when {
+                    wrong -> Color(0xFFE53935)
+                    selected -> Color(0xFFFF8F00)
+                    type == RAINBOW_FRUIT -> Color(0xFFB0BEC5)
+                    else -> Color(0x33A66A20)
+                },
                 RoundedCornerShape(9.dp)).padding(2.dp),
     ) {
         Canvas(Modifier.fillMaxSize()) {
-            drawImage(
-                image = spriteSheet,
-                srcOffset = IntOffset((type % 3) * sourceWidth, (type / 3) * sourceHeight),
-                srcSize = IntSize(sourceWidth, sourceHeight),
-                dstOffset = IntOffset.Zero,
-                dstSize = IntSize(size.width.toInt(), size.height.toInt()),
-            )
+            if (type == RAINBOW_FRUIT) {
+                drawCircle(
+                    color = Color(0xFF263238),
+                    radius = size.minDimension * 0.47f,
+                    center = center,
+                )
+                val colors = listOf(
+                    Color(0xFFE53935), Color(0xFFFF9800), Color(0xFFFFEB3B),
+                    Color(0xFF43A047), Color(0xFF1E88E5), Color(0xFF8E24AA),
+                )
+                colors.forEachIndexed { index, color ->
+                    drawCircle(
+                        color = color,
+                        radius = size.minDimension * (0.43f - index * 0.052f),
+                        center = center,
+                    )
+                }
+                drawLine(
+                    color = Color(0xFF6D4C41),
+                    start = center.copy(y = size.height * 0.18f),
+                    end = center.copy(x = size.width * 0.58f, y = size.height * 0.06f),
+                    strokeWidth = 3.dp.toPx(),
+                )
+                drawOval(
+                    color = Color(0xFF43A047),
+                    topLeft = androidx.compose.ui.geometry.Offset(size.width * 0.55f, size.height * 0.06f),
+                    size = androidx.compose.ui.geometry.Size(size.width * 0.28f, size.height * 0.16f),
+                )
+                drawCircle(
+                    Color.White.copy(alpha = 0.85f),
+                    size.minDimension * 0.055f,
+                    androidx.compose.ui.geometry.Offset(size.width * 0.34f, size.height * 0.3f),
+                )
+            } else {
+                drawImage(
+                    image = spriteSheet,
+                    srcOffset = IntOffset((type % 3) * sourceWidth, (type / 3) * sourceHeight),
+                    srcSize = IntSize(sourceWidth, sourceHeight),
+                    dstOffset = IntOffset.Zero,
+                    dstSize = IntSize(size.width.toInt(), size.height.toInt()),
+                )
+            }
             if (burst.value > 0f) {
                 repeat(8) { particle ->
                     val angle = particle * (Math.PI * 2.0 / 8.0)
@@ -467,7 +604,7 @@ private fun createPuzzleBoard(): List<Int> {
                 if (column >= 2 && board[row * PUZZLE_SIZE + column - 1] == board[row * PUZZLE_SIZE + column - 2]) add(board[row * PUZZLE_SIZE + column - 1])
                 if (row >= 2 && board[(row - 1) * PUZZLE_SIZE + column] == board[(row - 2) * PUZZLE_SIZE + column]) add(board[(row - 1) * PUZZLE_SIZE + column])
             }
-            board[row * PUZZLE_SIZE + column] = (0 until PUZZLE_TYPES).filterNot(blocked::contains).random()
+            board[row * PUZZLE_SIZE + column] = randomPuzzleType(blocked)
         }
     }
     return board
@@ -504,10 +641,15 @@ private fun collapsePuzzleMatches(board: List<Int>, matches: Set<Int>): MutableL
         var source = 0
         for (row in PUZZLE_SIZE - 1 downTo 0) {
             collapsed[row * PUZZLE_SIZE + column] =
-                if (source < remaining.size) remaining[source++] else Random.nextInt(PUZZLE_TYPES)
+                if (source < remaining.size) remaining[source++] else randomPuzzleType()
         }
     }
     return collapsed
+}
+
+private fun randomPuzzleType(blocked: Set<Int> = emptySet()): Int {
+    if (Random.nextInt(RAINBOW_FRUIT_CHANCE) == 0) return RAINBOW_FRUIT
+    return (0 until PUZZLE_TYPES).filterNot(blocked::contains).random()
 }
 
 internal fun calculatePuzzleReward(score: Int, clearReward: Long): Long {

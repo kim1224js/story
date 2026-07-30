@@ -67,6 +67,64 @@ class SeotdaMultiplayerRuleTest {
         )
     }
 
-    private fun card(month: Int, variant: Int = 1, bright: Boolean = false) =
-        SeotdaCard(month, variant, bright)
+    @Test
+    fun ribbonNineFourDoesNotReplayAgainstDdaeng() {
+        val ribbonNineFour = GambleManager.rankSeotda(
+            listOf(card(4, 1), card(9, 1)),
+        )
+        val oneDdaeng = GambleManager.rankSeotda(
+            listOf(card(1, 1), card(1, 2)),
+        )
+
+        assertEquals(false, ribbonNineFour.isMungtunguriNineFour)
+        assertEquals(
+            false,
+            GambleManager.shouldReplayForNineFour(listOf(ribbonNineFour, oneDdaeng)),
+        )
+    }
+
+    @Test
+    fun animalNineFourReplaysAgainstJangDdaeng() {
+        val animalNineFour = GambleManager.rankSeotda(
+            listOf(card(4, animal = true), card(9, animal = true)),
+        )
+        val jangDdaeng = GambleManager.rankSeotda(
+            listOf(card(10, 1), card(10, 2)),
+        )
+
+        assertEquals(true, animalNineFour.isMungtunguriNineFour)
+        assertEquals(
+            true,
+            GambleManager.shouldReplayForNineFour(listOf(animalNineFour, jangDdaeng)),
+        )
+    }
+
+    @Test
+    fun lowerPlaceTieDoesNotCauseTableReplay() {
+        val threePoints = GambleManager.rankSeotda(listOf(card(5), card(8)))
+        val ali = GambleManager.rankSeotda(listOf(card(1), card(2)))
+
+        assertEquals(
+            listOf(2),
+            GambleManager.tableWinnerIndices(listOf(threePoints, threePoints, ali)),
+        )
+    }
+
+    @Test
+    fun tiedHighestRankRequiresReplay() {
+        val ali = GambleManager.rankSeotda(listOf(card(1), card(2)))
+        val mangtong = GambleManager.rankSeotda(listOf(card(4), card(6)))
+
+        assertEquals(
+            listOf(0, 1),
+            GambleManager.tableWinnerIndices(listOf(ali, ali, mangtong)),
+        )
+    }
+
+    private fun card(
+        month: Int,
+        variant: Int = 1,
+        bright: Boolean = false,
+        animal: Boolean = false,
+    ) = SeotdaCard(month, variant, bright, animal)
 }

@@ -121,6 +121,8 @@ internal fun SettingsView(
     onMasterVolumeChange: (Float) -> Unit,
     onGameSoundEnabledChange: (Boolean) -> Unit,
     onGameSoundVolumeChange: (Float) -> Unit,
+    ttsSettings: AppTtsSettings,
+    onTtsSettingsChange: (AppTtsSettings) -> Unit,
     onLogout: () -> Unit,
     onSwitchAccount: (String) -> Unit,
 ) {
@@ -276,6 +278,11 @@ internal fun SettingsView(
                         enabled = gameSoundEnabled,
                         switchChecked = gameSoundEnabled,
                         onSwitchChange = onGameSoundEnabledChange,
+                    )
+                    HorizontalDivider(color = Color(0xFFE6E3DA))
+                    TtsSettingsPanel(
+                        settings = ttsSettings,
+                        onSettingsChange = onTtsSettingsChange,
                     )
                 }
             }

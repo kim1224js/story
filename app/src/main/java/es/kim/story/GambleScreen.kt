@@ -66,6 +66,7 @@ import java.util.Random as JavaRandom
 internal fun GambleView(viewModel: MainViewModel) {
     val context = LocalContext.current
     val gameAudioVolume = LocalGameAudioVolume.current
+    val ttsSettings = LocalTtsSettings.current
     val pagerState = rememberPagerState(pageCount = { 4 })
     val scope = rememberCoroutineScope()
     val gameLabels = listOf("가위바위보", "1대1 카드", "3장 카드", "교환소")
@@ -76,8 +77,7 @@ internal fun GambleView(viewModel: MainViewModel) {
         val engine = TextToSpeech(context.applicationContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 gambleTts?.language = Locale.KOREAN
-                gambleTts?.setPitch(1.55f)
-                gambleTts?.setSpeechRate(1.2f)
+                gambleTts?.let { configureAppTts(it, ttsSettings, TtsRole.Guide) }
                 gambleTtsReady = true
             }
         }
@@ -90,7 +90,8 @@ internal fun GambleView(viewModel: MainViewModel) {
         }
     }
     val speakResult: (String) -> Unit = { message ->
-        if (gambleTtsReady && gameAudioVolume > 0f) {
+        if (gambleTtsReady && gameAudioVolume > 0f && ttsSettings.enabled) {
+            gambleTts?.let { configureAppTts(it, ttsSettings, TtsRole.Guide) }
             gambleTts?.speak(
                 message,
                 TextToSpeech.QUEUE_FLUSH,
@@ -140,6 +141,7 @@ internal fun GambleView(viewModel: MainViewModel) {
 internal fun GambleShopView(viewModel: MainViewModel) {
     val context = LocalContext.current
     val gameAudioVolume = LocalGameAudioVolume.current
+    val ttsSettings = LocalTtsSettings.current
     val user by viewModel.user.collectAsState()
     val money = user?.money ?: 0L
     val blueChips = user?.blueChips ?: 0L
@@ -748,7 +750,8 @@ internal fun SeotdaView(viewModel: MainViewModel, speakResult: (String) -> Unit)
                     Text(
                         when (result.outcome) {
                             SeotdaOutcome.Win ->
-                                "+${seotdaBetLabel(result.wager, result.betCurrency)}" +
+                                "순이익 +${seotdaBetLabel(GambleManager.seotdaNetProfit(result.wager, result.playerCount), result.betCurrency)}" +
+                                "\n전체 팟 ${seotdaBetLabel(GambleManager.seotdaTotalPot(result.wager, result.playerCount), result.betCurrency)}" +
                                 if (result.premium > 0) "\n족보 보너스 +${result.premium.won()}" else ""
                             SeotdaOutcome.Draw -> "판돈 반환"
                             SeotdaOutcome.Lose -> "-${seotdaBetLabel(result.wager, result.betCurrency)}"
@@ -1057,7 +1060,8 @@ internal fun ThreeCardSeotdaView(viewModel: MainViewModel, speakResult: (String)
                     Text(
                         when (result.outcome) {
                             SeotdaOutcome.Win ->
-                                "+${seotdaBetLabel(result.wager, result.betCurrency)}" +
+                                "순이익 +${seotdaBetLabel(GambleManager.seotdaNetProfit(result.wager, result.playerCount), result.betCurrency)}" +
+                                "\n전체 팟 ${seotdaBetLabel(GambleManager.seotdaTotalPot(result.wager, result.playerCount), result.betCurrency)}" +
                                 if (result.premium > 0) "\n족보 보너스 +${result.premium.won()}" else ""
                             SeotdaOutcome.Draw -> "판돈 반환"
                             SeotdaOutcome.Lose -> "-${seotdaBetLabel(result.wager, result.betCurrency)}"
@@ -1140,7 +1144,13 @@ internal fun SeotdaCardView(card: SeotdaCard, hidden: Boolean = false, compact: 
                 Text("${card.month}월", Modifier.align(Alignment.TopStart).padding(4.dp),
                     color = Color(0xFF8B0000), fontWeight = FontWeight.Black,
                     style = MaterialTheme.typography.labelSmall)
-                Text(if (card.bright) "광" else if (card.variant == 1) "띠" else "피",
+                Text(
+                    when {
+                        card.bright -> "광"
+                        card.animal -> "열끗"
+                        card.variant == 1 -> "띠"
+                        else -> "피"
+                    },
                     Modifier.align(Alignment.BottomEnd).padding(5.dp),
                     color = if (card.bright) Color(0xFFE65100) else Color(0xFF4E342E),
                     fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
@@ -1216,7 +1226,10 @@ internal fun SeotdaCardArtwork(card: SeotdaCard, modifier: Modifier = Modifier) 
             4 -> {
                 stem(Offset(w * .18f, h * .08f), Offset(w * .72f, h * .9f), darkGreen)
                 repeat(8) { i -> drawCircle(purple, w * .055f, Offset(w * (.25f + (i % 3) * .2f), h * (.2f + i * .075f))) }
-                if (card.variant == 1) ribbon(h * .62f)
+                if (card.animal) {
+                    drawOval(Color(0xFF5D4037), Offset(w * .34f, h * .52f), Size(w * .42f, h * .24f))
+                    drawCircle(Color.White, w * .035f, Offset(w * .64f, h * .57f))
+                } else if (card.variant == 1) ribbon(h * .62f)
             }
             5 -> {
                 repeat(5) { i ->
@@ -1247,7 +1260,7 @@ internal fun SeotdaCardArtwork(card: SeotdaCard, modifier: Modifier = Modifier) 
             }
             9 -> {
                 repeat(7) { i -> flower(Offset(w * (.16f + (i % 3) * .3f), h * (.24f + (i / 3) * .22f)), yellow, w * .065f) }
-                if (card.variant == 1) {
+                if (card.animal) {
                     drawOval(Color(0xFF263238), Offset(w * .28f, h * .58f), Size(w * .45f, h * .25f))
                     drawOval(Color(0xFFF5F5F5), Offset(w * .34f, h * .61f), Size(w * .33f, h * .14f))
                 }

@@ -66,6 +66,7 @@ import java.util.Random as JavaRandom
 internal fun StoryView(viewModel: MainViewModel) {
     val context = LocalContext.current
     val gameAudioVolume = LocalGameAudioVolume.current
+    val ttsSettings = LocalTtsSettings.current
     val user by viewModel.user.collectAsState()
     val currentChapter = user?.chapter ?: 1
     val completed = currentChapter > storyChapters.size
@@ -83,8 +84,7 @@ internal fun StoryView(viewModel: MainViewModel) {
         val engine = TextToSpeech(context.applicationContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 storyTts?.language = Locale.KOREAN
-                storyTts?.setPitch(1.0f)
-                storyTts?.setSpeechRate(0.92f)
+                storyTts?.let { configureAppTts(it, ttsSettings, TtsRole.StoryCharacter) }
                 storyTtsReady = true
             }
         }
@@ -158,6 +158,7 @@ internal fun StoryView(viewModel: MainViewModel) {
                                         append(". ")
                                         append(renderStoryForUser(chapter.story, user?.userId.orEmpty()))
                                     }
+                                    storyTts?.let { configureAppTts(it, ttsSettings, TtsRole.StoryCharacter) }
                                     storyTts?.speak(
                                         storyText,
                                         TextToSpeech.QUEUE_FLUSH,
@@ -167,7 +168,7 @@ internal fun StoryView(viewModel: MainViewModel) {
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            enabled = storyTtsReady,
+                            enabled = storyTtsReady && ttsSettings.enabled && gameAudioVolume > 0f,
                         ) {
                             Text(if (storyReading) "■ 읽기 중지" else "▶ 스토리 읽어주기")
                         }

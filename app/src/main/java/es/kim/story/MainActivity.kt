@@ -68,6 +68,22 @@ val LocalGameAudioVolume = staticCompositionLocalOf { 1f }
     var gameSoundVolume by remember {
         mutableFloatStateOf(bgmPreferences.getFloat("game_sound_volume", 0.3f))
     }
+    var ttsSettings by remember {
+        mutableStateOf(
+            AppTtsSettings(
+                enabled = bgmPreferences.getBoolean("tts_enabled", true),
+                guideVoice = bgmPreferences.getString("tts_guide_voice", "").orEmpty(),
+                celebrationVoice = bgmPreferences.getString("tts_celebration_voice", "").orEmpty(),
+                characterVoice = bgmPreferences.getString("tts_character_voice", "").orEmpty(),
+                gameCharacterVoice = bgmPreferences.getString("tts_game_character_voice", "").orEmpty(),
+                style = runCatching {
+                    TtsStyle.valueOf(bgmPreferences.getString("tts_style", TtsStyle.Natural.name).orEmpty())
+                }.getOrDefault(TtsStyle.Natural),
+                pitch = bgmPreferences.getFloat("tts_pitch", 1f),
+                speed = bgmPreferences.getFloat("tts_speed", 1f),
+            ),
+        )
+    }
     var homeBgm by remember { mutableIntStateOf(R.raw.bgm_wandering_woodlands) }
     val savedUser by vm.user.collectAsState()
     val accounts by vm.accounts.collectAsState()
@@ -110,6 +126,7 @@ val LocalGameAudioVolume = staticCompositionLocalOf { 1f }
     )
     CompositionLocalProvider(
         LocalGameAudioVolume provides if (gameSoundEnabled) gameSoundVolume * masterVolume else 0f,
+        LocalTtsSettings provides ttsSettings,
     ) {
     Scaffold(Modifier.fillMaxSize()) { padding -> Box(Modifier.fillMaxSize().padding(padding)) {
         when (screen) {
@@ -154,6 +171,20 @@ val LocalGameAudioVolume = staticCompositionLocalOf { 1f }
                 onGameSoundVolumeChange = {
                     gameSoundVolume = it
                     bgmPreferences.edit().putFloat("game_sound_volume", it).apply()
+                },
+                ttsSettings = ttsSettings,
+                onTtsSettingsChange = {
+                    ttsSettings = it
+                    bgmPreferences.edit()
+                        .putBoolean("tts_enabled", it.enabled)
+                        .putString("tts_guide_voice", it.guideVoice)
+                        .putString("tts_celebration_voice", it.celebrationVoice)
+                        .putString("tts_character_voice", it.characterVoice)
+                        .putString("tts_game_character_voice", it.gameCharacterVoice)
+                        .putString("tts_style", it.style.name)
+                        .putFloat("tts_pitch", it.pitch)
+                        .putFloat("tts_speed", it.speed)
+                        .apply()
                 },
                 onBgmTrackChange = { homeBgm = it },
                 onLogout = {

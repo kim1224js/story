@@ -70,13 +70,14 @@ private enum class MainMenu(val label: String, val icon: String, val title: Stri
     Work("알바", "💼", "알바", "한 번에 한 개의 알바만 진행할 수 있어요"),
     Settlement("런닝", "👟", "런닝하기", "걸음 수를 채우고 보상을 받는 공간이에요"),
     Gamble("게임", "🎲", "미니게임", "게임 머니로 즐기는 카드와 승부 게임"),
+    Puzzle("퍼즐", "🧩", "퍼즐", "블록을 맞추고 연쇄 콤보에 도전해 보세요"),
     Story("스토리", "📖", "스토리", "나의 이야기를 진행해 보세요"),
     Settings("설정", "⚙", "설정", "로컬 프로필과 캐릭터를 관리하세요"),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainMenuScreen(
+internal fun MainMenuScreen(
     userId: String,
     viewModel: MainViewModel,
     bgmEnabled: Boolean,
@@ -89,6 +90,8 @@ fun MainMenuScreen(
     onMasterVolumeChange: (Float) -> Unit,
     onGameSoundEnabledChange: (Boolean) -> Unit,
     onGameSoundVolumeChange: (Float) -> Unit,
+    ttsSettings: AppTtsSettings,
+    onTtsSettingsChange: (AppTtsSettings) -> Unit,
     onBgmTrackChange: (Int) -> Unit,
     onLogout: () -> Unit,
     onSwitchAccount: (String) -> Unit,
@@ -100,6 +103,7 @@ fun MainMenuScreen(
             when (selected) {
                 MainMenu.Work -> R.raw.bgm_jaunt
                 MainMenu.Gamble -> R.raw.bgm_bells_of_winter
+                MainMenu.Puzzle -> R.raw.bgm_fairy_lights
                 MainMenu.Story -> if ((user?.chapter ?: 1) >= 21) {
                     R.raw.bgm_creed_of_course
                 } else {
@@ -192,6 +196,7 @@ fun MainMenuScreen(
                 MainMenu.Work -> WorkView(viewModel, onBgmTrackChange)
                 MainMenu.Settlement -> SettlementView(viewModel)
                 MainMenu.Gamble -> GambleView(viewModel)
+                MainMenu.Puzzle -> PuzzleView(viewModel)
                 MainMenu.Story -> StoryView(viewModel)
                 MainMenu.Settings -> SettingsView(
                     userId = userId,
@@ -206,6 +211,8 @@ fun MainMenuScreen(
                     onMasterVolumeChange = onMasterVolumeChange,
                     onGameSoundEnabledChange = onGameSoundEnabledChange,
                     onGameSoundVolumeChange = onGameSoundVolumeChange,
+                    ttsSettings = ttsSettings,
+                    onTtsSettingsChange = onTtsSettingsChange,
                     onLogout = onLogout,
                     onSwitchAccount = onSwitchAccount,
                 )

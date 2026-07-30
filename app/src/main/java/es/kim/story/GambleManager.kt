@@ -30,7 +30,12 @@ data class GambleState(
     val replayWager: Long = 0,
 )
 
-data class SeotdaCard(val month: Int, val variant: Int, val bright: Boolean = false)
+data class SeotdaCard(
+    val month: Int,
+    val variant: Int,
+    val bright: Boolean = false,
+    val animal: Boolean = false,
+)
 enum class SeotdaBetCurrency { Money, BlueChip }
 
 data class SeotdaHandRank(
@@ -55,6 +60,7 @@ data class SeotdaResult(
     val computerRanks: List<SeotdaHandRank> = listOf(computerRank),
     val playerPlacement: Int = 1,
     val firstPlaceComputerIndex: Int? = null,
+    val playerCount: Int = 2,
 )
 
 data class SeotdaState(
@@ -350,6 +356,12 @@ class GambleManager @Inject constructor(
             return
         }
         val specialWinner = specialWinners.singleOrNull()
+        val winnerIndices = specialWinner?.let(::listOf) ?: tableWinnerIndices(allRanks)
+        if (winnerIndices.size != 1) {
+            replayThreeCardSeotda(current, "최고 족보가 같아 판수 차감 없이 재경기합니다.")
+            return
+        }
+        val winnerIndex = winnerIndices.single()
         val comparisons = computerRanks.mapIndexed { index, computerRank ->
             when (specialWinner) {
                 0 -> 1
@@ -357,14 +369,10 @@ class GambleManager @Inject constructor(
                 else -> compareSeotda(playerRank, computerRank)
             }
         }
-        if (comparisons.any { it == 0 }) {
-            replayThreeCardSeotda(current, "무승부로 판수 차감 없이 재경기합니다.")
-            return
-        }
-        val outcome = if (comparisons.all { it > 0 }) SeotdaOutcome.Win else SeotdaOutcome.Lose
+        val outcome = if (winnerIndex == 0) SeotdaOutcome.Win else SeotdaOutcome.Lose
         val premium = ddaengPremium(outcome, playerRank)
         val betPayout = when (outcome) {
-            SeotdaOutcome.Win -> Math.multiplyExact(current.wager, 2L)
+            SeotdaOutcome.Win -> seotdaTotalPot(current.wager, current.playerCount)
             SeotdaOutcome.Draw -> current.wager
             SeotdaOutcome.Lose -> 0
         }
@@ -375,12 +383,7 @@ class GambleManager @Inject constructor(
             if (betPayout > 0) repository.addBlueChips(betPayout)
             if (premium > 0) repository.addMoney(premium)
         }
-        val firstPlaceComputerIndex = if (outcome == SeotdaOutcome.Win) null else {
-            specialWinner?.takeIf { it > 0 }?.minus(1) ?:
-            computerRanks.indices.maxWithOrNull { first, second ->
-                compareSeotda(computerRanks[first], computerRanks[second])
-            }
-        }
+        val firstPlaceComputerIndex = winnerIndex.takeIf { it > 0 }?.minus(1)
         val strongestComputer = firstPlaceComputerIndex?.let(computerRanks::get)
             ?: computerRanks.maxBy { rankAgainst(it, playerRank) }
         val playerPlacement = 1 + comparisons.count { it < 0 }
@@ -388,7 +391,7 @@ class GambleManager @Inject constructor(
             result = SeotdaResult(
                 outcome, playerRank, strongestComputer, current.wager, current.betCurrency,
                 premium, computerRanks,
-                playerPlacement, firstPlaceComputerIndex,
+                playerPlacement, firstPlaceComputerIndex, current.playerCount,
             ),
         )
     }
@@ -408,6 +411,12 @@ class GambleManager @Inject constructor(
             return
         }
         val specialWinner = specialWinners.singleOrNull()
+        val winnerIndices = specialWinner?.let(::listOf) ?: tableWinnerIndices(allRanks)
+        if (winnerIndices.size != 1) {
+            replaySeotda(current, "최고 족보가 같아 판수 차감 없이 재경기합니다.")
+            return
+        }
+        val winnerIndex = winnerIndices.single()
         val comparisons = computerRanks.mapIndexed { index, computerRank ->
             when (specialWinner) {
                 0 -> 1
@@ -415,14 +424,10 @@ class GambleManager @Inject constructor(
                 else -> compareSeotda(playerRank, computerRank)
             }
         }
-        if (comparisons.any { it == 0 }) {
-            replaySeotda(current, "무승부로 판수 차감 없이 재경기합니다.")
-            return
-        }
-        val outcome = if (comparisons.all { it > 0 }) SeotdaOutcome.Win else SeotdaOutcome.Lose
+        val outcome = if (winnerIndex == 0) SeotdaOutcome.Win else SeotdaOutcome.Lose
         val premium = ddaengPremium(outcome, playerRank)
         val betPayout = when (outcome) {
-            SeotdaOutcome.Win -> Math.multiplyExact(current.wager, 2L)
+            SeotdaOutcome.Win -> seotdaTotalPot(current.wager, current.playerCount)
             SeotdaOutcome.Draw -> current.wager
             SeotdaOutcome.Lose -> 0
         }
@@ -433,12 +438,7 @@ class GambleManager @Inject constructor(
             if (betPayout > 0) repository.addBlueChips(betPayout)
             if (premium > 0) repository.addMoney(premium)
         }
-        val firstPlaceComputerIndex = if (outcome == SeotdaOutcome.Win) null else {
-            specialWinner?.takeIf { it > 0 }?.minus(1) ?:
-            computerRanks.indices.maxWithOrNull { first, second ->
-                compareSeotda(computerRanks[first], computerRanks[second])
-            }
-        }
+        val firstPlaceComputerIndex = winnerIndex.takeIf { it > 0 }?.minus(1)
         val strongestComputer = firstPlaceComputerIndex?.let(computerRanks::get)
             ?: computerRanks.maxBy { rankAgainst(it, playerRank) }
         val playerPlacement = 1 + comparisons.count { it < 0 }
@@ -446,7 +446,7 @@ class GambleManager @Inject constructor(
             result = SeotdaResult(
                 outcome, playerRank, strongestComputer, current.wager, current.betCurrency,
                 premium, computerRanks,
-                playerPlacement, firstPlaceComputerIndex,
+                playerPlacement, firstPlaceComputerIndex, current.playerCount,
             ),
         )
     }
@@ -553,6 +553,15 @@ class GambleManager @Inject constructor(
                 (clearCost / 100L).coerceAtLeast(1L),
             )
         }
+        internal fun seotdaTotalPot(wager: Long, playerCount: Int): Long {
+            require(wager >= 0L)
+            require(playerCount in 2..4)
+            return Math.multiplyExact(wager, playerCount.toLong())
+        }
+
+        internal fun seotdaNetProfit(wager: Long, playerCount: Int): Long =
+            Math.subtractExact(seotdaTotalPot(wager, playerCount), wager)
+
         const val SEOTDA_MAX_RAISES = 3
         const val GAMBLE_COUNT_RESET_COST = 1_000_000L
         const val BLUE_CHIP_BASE_WAGER = 1L
@@ -566,7 +575,12 @@ class GambleManager @Inject constructor(
 
         fun seotdaDeck(): List<SeotdaCard> = (1..10).flatMap { month ->
             listOf(
-                SeotdaCard(month, 1, month in setOf(1, 3, 8)),
+                SeotdaCard(
+                    month = month,
+                    variant = 1,
+                    bright = month in setOf(1, 3, 8),
+                    animal = month in setOf(4, 9),
+                ),
                 SeotdaCard(month, 2),
             )
         }
@@ -594,7 +608,7 @@ class GambleManager @Inject constructor(
                 return SeotdaHandRank(6_001, "암행어사", isBrightCatcher = true)
             }
             if (months == listOf(4, 9)) {
-                val mungtunguri = cards.all { it.variant == 1 }
+                val mungtunguri = cards.all { it.animal }
                 return SeotdaHandRank(
                     strength = 6_003,
                     name = if (mungtunguri) "멍텅구리 구사" else "구사",
@@ -652,7 +666,7 @@ class GambleManager @Inject constructor(
             else -> rank.strength
         }
 
-        private fun shouldReplayForNineFour(ranks: List<SeotdaHandRank>): Boolean {
+        internal fun shouldReplayForNineFour(ranks: List<SeotdaHandRank>): Boolean {
             val nineFourRanks = ranks.filter { it.isNineFour }
             if (nineFourRanks.isEmpty()) return false
 
@@ -692,6 +706,16 @@ class GambleManager @Inject constructor(
             val bestSpecial = specialScores.values.maxOrNull() ?: return emptyList()
             if (bestSpecial <= normalBest) return emptyList()
             return specialScores.filterValues { it == bestSpecial }.keys.toList()
+        }
+
+        internal fun tableWinnerIndices(ranks: List<SeotdaHandRank>): List<Int> {
+            val specialWinners = tableSpecialWinnerIndices(ranks)
+            if (specialWinners.isNotEmpty()) return specialWinners
+            return ranks.indices.filter { candidate ->
+                ranks.indices.all { opponent ->
+                    candidate == opponent || compareSeotda(ranks[candidate], ranks[opponent]) >= 0
+                }
+            }
         }
 
         private val CATCHABLE_BRIGHT_DDAENGS = setOf("13광땡", "18광땡")

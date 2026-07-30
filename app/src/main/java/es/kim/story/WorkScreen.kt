@@ -62,6 +62,22 @@ import java.time.LocalDate
 import java.util.Locale
 import java.util.Random as JavaRandom
 
+internal enum class MoleTargetType(val scoreMultiplier: Int, val label: String) {
+    Normal(1, "두더지"),
+    Golden(10, "황금 두더지"),
+    Chick(-1, "병아리"),
+    Hamster(-5, "햄스터"),
+}
+
+private fun createMoleTargets(): Map<Int, MoleTargetType> =
+    (0 until 9).shuffled().take(3).associateWith {
+        when (Random.nextInt(100)) {
+            in 0 until 50 -> MoleTargetType.Normal
+            in 50 until 60 -> MoleTargetType.Golden
+            in 60 until 85 -> MoleTargetType.Chick
+            else -> MoleTargetType.Hamster
+        }
+    }
 @Composable
 internal fun WorkView(
     viewModel: MainViewModel,
@@ -69,6 +85,7 @@ internal fun WorkView(
 ) {
     val context = LocalContext.current
     val gameAudioVolume = LocalGameAudioVolume.current
+    val ttsSettings = LocalTtsSettings.current
     val state by viewModel.workState.collectAsState()
     val user by viewModel.user.collectAsState()
     val currentChapter = user?.chapter ?: 1
@@ -81,11 +98,12 @@ internal fun WorkView(
     var workTab by remember { mutableIntStateOf(0) }
     var moleRunning by remember { mutableStateOf(false) }
     var moleSecondsLeft by remember { mutableIntStateOf(60) }
-    var moleTargets by remember { mutableStateOf(emptySet<Int>()) }
-    var moleHits by remember { mutableIntStateOf(0) }
+    var moleTargets by remember { mutableStateOf(emptyMap<Int, MoleTargetType>()) }
+    var moleScore by remember { mutableIntStateOf(0) }
     var moleResult by remember { mutableStateOf<String?>(null) }
     var moleCountdown by remember { mutableStateOf<Int?>(null) }
     var moleHitEffects by remember { mutableStateOf(emptySet<Int>()) }
+    var moleHitTypes by remember { mutableStateOf(emptyMap<Int, MoleTargetType>()) }
     var moleMissEffects by remember { mutableStateOf(emptySet<Int>()) }
     var moleInputLocked by remember { mutableStateOf(false) }
     var iceGameResult by remember { mutableStateOf<String?>(null) }
@@ -109,8 +127,7 @@ internal fun WorkView(
         val engine = TextToSpeech(context.applicationContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 moleTts?.language = Locale.KOREAN
-                moleTts?.setPitch(1.65f)
-                moleTts?.setSpeechRate(1.35f)
+                moleTts?.let { configureAppTts(it, ttsSettings, TtsRole.GameCharacter) }
                 moleTtsReady = true
             }
         }
@@ -138,7 +155,6 @@ internal fun WorkView(
             when (workTab) {
                 2 -> R.raw.bgm_bells_of_winter
                 3 -> R.raw.bgm_creed_of_course
-                4 -> R.raw.bgm_fairy_lights
                 else -> R.raw.bgm_jaunt
             },
         )
@@ -155,18 +171,21 @@ internal fun WorkView(
         if (!moleRunning) return@LaunchedEffect
         repeat(60) { elapsed ->
             moleSecondsLeft = 60 - elapsed
-            moleTargets = (0 until 9).shuffled().take(3).toSet()
+            moleTargets = createMoleTargets()
             delay(1_000)
         }
-        moleTargets = emptySet()
+        moleTargets = emptyMap()
         moleHitEffects = emptySet()
+        moleHitTypes = emptyMap()
         moleMissEffects = emptySet()
         moleInputLocked = false
         moleSecondsLeft = 0
         moleRunning = false
-        val totalReward = Math.multiplyExact(moleHits.toLong(), moleRewardPerHit)
-        viewModel.claimMoleReward(moleHits, moleRewardPerHit)
-        if (moleTtsReady && gameAudioVolume > 0f) {
+        val rewardScore = moleScore.coerceAtLeast(0)
+        val totalReward = Math.multiplyExact(rewardScore.toLong(), moleRewardPerHit)
+        viewModel.claimMoleReward(rewardScore, moleRewardPerHit)
+        if (moleTtsReady && gameAudioVolume > 0f && ttsSettings.enabled) {
+            moleTts?.let { configureAppTts(it, ttsSettings, TtsRole.GameCharacter) }
             moleTts?.speak(
                 "결과 공개",
                 TextToSpeech.QUEUE_FLUSH,
@@ -174,18 +193,19 @@ internal fun WorkView(
                 "mole_result_${System.currentTimeMillis()}",
             )
         }
-        moleResult = "${moleHits}마리 성공 · ${compactWon(totalReward.toDouble())} 획득"
+        moleResult = "${moleScore}점 · ${compactWon(totalReward.toDouble())} 획득"
     }
 
     LaunchedEffect(moleCountdown) {
         val count = moleCountdown ?: return@LaunchedEffect
-        if (moleTtsReady && gameAudioVolume > 0f) {
+        if (moleTtsReady && gameAudioVolume > 0f && ttsSettings.enabled) {
             val countdownVoice = when (count) {
                 3 -> "쓰리"
                 2 -> "투"
                 1 -> "원"
                 else -> "스타트"
             }
+            moleTts?.let { configureAppTts(it, ttsSettings, TtsRole.GameCharacter) }
             moleTts?.speak(
                 countdownVoice,
                 TextToSpeech.QUEUE_FLUSH,
@@ -224,11 +244,6 @@ internal fun WorkView(
                 selected = workTab == 3,
                 onClick = { if (!moleRunning && moleCountdown == null) workTab = 3 },
                 text = { Text("미로") },
-            )
-            Tab(
-                selected = workTab == 4,
-                onClick = { if (!moleRunning && moleCountdown == null) workTab = 4 },
-                text = { Text("퍼즐") },
             )
         }
         Spacer(Modifier.height(12.dp))
@@ -306,15 +321,17 @@ internal fun WorkView(
                 targets = moleTargets,
                 hitEffects = moleHitEffects,
                 missEffects = moleMissEffects,
-                hits = moleHits,
+                score = moleScore,
+                hitTypes = moleHitTypes,
                 playsToday = state.molePlaysToday,
                 rewardPerHit = moleRewardPerHit,
                 onStart = {
                     if (viewModel.startMoleGame()) {
-                        moleHits = 0
+                        moleScore = 0
                         moleSecondsLeft = 60
-                        moleTargets = emptySet()
+                        moleTargets = emptyMap()
                         moleHitEffects = emptySet()
+                        moleHitTypes = emptyMap()
                         moleMissEffects = emptySet()
                         moleInputLocked = false
                         moleResult = null
@@ -322,13 +339,21 @@ internal fun WorkView(
                     }
                 },
                 onHit = { index ->
-                    if (moleRunning && !moleInputLocked && index in moleTargets) {
+                    val target = moleTargets[index]
+                    if (moleRunning && !moleInputLocked && target != null) {
                         moleTargets = moleTargets - index
                         moleHitEffects = moleHitEffects + index
-                        moleHits += 1
-                        if (moleTtsReady && gameAudioVolume > 0f) {
-                            moleTts?.speak(
-                                "뀨웅",
+                        moleHitTypes = moleHitTypes + (index to target)
+                        moleScore += target.scoreMultiplier
+                        if (moleTtsReady && gameAudioVolume > 0f && ttsSettings.enabled) {
+                            moleTts?.let { configureAppTts(it, ttsSettings, TtsRole.GameCharacter) }
+            moleTts?.speak(
+                                when (target) {
+                                    MoleTargetType.Normal -> "뀨웅"
+                                    MoleTargetType.Golden -> "황금 두더지!"
+                                    MoleTargetType.Chick -> "병아리는 안 돼요"
+                                    MoleTargetType.Hamster -> "햄스터 조심!"
+                                },
                                 TextToSpeech.QUEUE_FLUSH,
                                 gameSpeechParams(gameAudioVolume),
                                 "mole_hit_${System.currentTimeMillis()}",
@@ -337,6 +362,7 @@ internal fun WorkView(
                         moleEffectScope.launch {
                             delay(320)
                             moleHitEffects = moleHitEffects - index
+                            moleHitTypes = moleHitTypes - index
                         }
                     }
                 },
@@ -378,8 +404,9 @@ internal fun WorkView(
                             moleEffectScope.launch {
                                 delay(180)
                                 iceToneGenerator.startTone(ToneGenerator.TONE_PROP_ACK, 450)
-                                if (moleTtsReady && gameAudioVolume > 0f) {
-                                    moleTts?.speak(
+                                if (moleTtsReady && gameAudioVolume > 0f && ttsSettings.enabled) {
+                                    moleTts?.let { configureAppTts(it, ttsSettings, TtsRole.GameCharacter) }
+            moleTts?.speak(
                                         "축하해요! 펭귄을 찾았어요!",
                                         TextToSpeech.QUEUE_FLUSH,
                                         gameSpeechParams(gameAudioVolume),
@@ -400,7 +427,7 @@ internal fun WorkView(
                     }
                 },
             )
-        } else if (workTab == 3) {
+        } else {
             LaunchedEffect(user?.userId) { viewModel.ensureMaze() }
             MazeGameView(
                 modifier = Modifier.fillMaxWidth().weight(1f),
@@ -429,13 +456,6 @@ internal fun WorkView(
                         }
                     }
                 },
-            )
-        } else {
-            PuzzleGameView(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                clearReward = currentClearCost,
-                bestScore = state.puzzleBestScore,
-                onReward = { score -> viewModel.claimPuzzleReward(score, currentClearCost) },
             )
         }
     }
@@ -587,10 +607,11 @@ internal fun MoleGameView(
     running: Boolean,
     preparing: Boolean,
     secondsLeft: Int,
-    targets: Set<Int>,
+    targets: Map<Int, MoleTargetType>,
     hitEffects: Set<Int>,
+    hitTypes: Map<Int, MoleTargetType>,
     missEffects: Set<Int>,
-    hits: Int,
+    score: Int,
     playsToday: Int,
     rewardPerHit: Long,
     onStart: () -> Unit,
@@ -633,7 +654,7 @@ internal fun MoleGameView(
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                "한 마리당 ${compactWon(rewardPerHit.toDouble())}",
+                "일반 +1 · 황금 +10 · 병아리 -1 · 햄스터 -5",
                 color = Color(0xFF2E7D32),
                 fontWeight = FontWeight.Bold,
             )
@@ -643,9 +664,9 @@ internal fun MoleGameView(
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
                 Text("⏱ ${secondsLeft}초", fontWeight = FontWeight.ExtraBold)
-                Text("🎯 ${hits}마리", fontWeight = FontWeight.ExtraBold)
+                Text("🎯 ${score}점", fontWeight = FontWeight.ExtraBold)
                 Text(
-                    "💰 ${compactWon(Math.multiplyExact(hits.toLong(), rewardPerHit).toDouble())}",
+                    "💰 ${compactWon(Math.multiplyExact(score.coerceAtLeast(0).toLong(), rewardPerHit).toDouble())}",
                     fontWeight = FontWeight.ExtraBold)
             }
             Spacer(Modifier.height(10.dp))
@@ -657,6 +678,7 @@ internal fun MoleGameView(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(9) { index ->
+                    val targetType = targets[index] ?: hitTypes[index]
                     val visible = index in targets
                     val hit = index in hitEffects
                     val miss = index in missEffects
@@ -673,6 +695,9 @@ internal fun MoleGameView(
                                 when {
                                     hit -> Color(0xFFE53935)
                                     miss -> Color(0xFFBCAAA4)
+                                    targetType == MoleTargetType.Golden -> Color(0xFFFFD54F)
+                                    targetType == MoleTargetType.Chick -> Color(0xFFFFF59D)
+                                    targetType == MoleTargetType.Hamster -> Color(0xFFD7CCC8)
                                     visible -> Color(0xFF8BC34A)
                                     else -> Color(0xFF5D4037)
                                 },
@@ -723,15 +748,25 @@ internal fun MoleGameView(
                                     )
                                 }
                             }
-                            Image(
-                                painter = painterResource(
-                                    if (hit) R.drawable.mole_character_hit
-                                    else R.drawable.mole_character,
-                                ),
-                                contentDescription = "두더지",
-                                modifier = Modifier.fillMaxSize().padding(4.dp).scale(characterScale),
-                                contentScale = ContentScale.Fit,
-                            )
+                            when (targetType) {
+                                MoleTargetType.Chick -> Text("🐥", style = MaterialTheme.typography.displayMedium)
+                                MoleTargetType.Hamster -> Text("🐹", style = MaterialTheme.typography.displayMedium)
+                                MoleTargetType.Golden, MoleTargetType.Normal, null -> Image(
+                                    painter = painterResource(
+                                        if (hit && targetType == MoleTargetType.Normal) R.drawable.mole_character_hit
+                                        else R.drawable.mole_character,
+                                    ),
+                                    contentDescription = targetType?.label ?: "두더지",
+                                    modifier = Modifier.fillMaxSize().padding(4.dp).scale(characterScale),
+                                    contentScale = ContentScale.Fit,
+                                    colorFilter = if (targetType == MoleTargetType.Golden) {
+                                        androidx.compose.ui.graphics.ColorFilter.tint(
+                                            Color(0xFFFFC107),
+                                            androidx.compose.ui.graphics.BlendMode.Modulate,
+                                        )
+                                    } else null,
+                                )
+                            }
                         } else {
                             if (miss) {
                                 Box(
