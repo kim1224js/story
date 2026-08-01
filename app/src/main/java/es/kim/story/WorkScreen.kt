@@ -55,7 +55,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
-import kotlin.math.roundToLong
 import kotlin.random.Random
 import java.text.NumberFormat
 import java.time.LocalDate
@@ -438,10 +437,10 @@ internal fun WorkView(
                 state = state,
                 money = user?.money ?: 0L,
                 reward = mazeReward,
-                onMove = { dx, dy, itemId ->
+                onMove = { dx, dy ->
                     val targetX = state.mazeX + dx
                     val targetY = state.mazeY + dy
-                    if (viewModel.moveMaze(targetX, targetY, itemId)) {
+                    if (viewModel.moveMaze(targetX, targetY)) {
                         iceSoundPool.play(
                             mazeStepSound,
                             gameAudioVolume,
@@ -935,6 +934,7 @@ internal fun IcePenguinGameView(
                 ) {
                     Text(
                         when {
+                            running -> "게임 진행 중 · 얼음을 눌러주세요"
                             brokenCells.isEmpty() || penguinFound -> "게임 시작"
                             attemptsLeft == 0 -> "같은 얼음판 이어서 찾기"
                             else -> "게임 시작"
@@ -1066,7 +1066,6 @@ internal fun IceCellArtwork(broken: Boolean, seed: Int) {
 
 internal data class MazeLayout(
     val openings: IntArray,
-    val itemCells: Set<Int>,
     val exitCells: Set<Int>,
 )
 
@@ -1115,41 +1114,7 @@ internal fun generateMazeLayout(seed: Long): MazeLayout {
     }
 
     val exits = mazeExitCells(seed)
-    val goal = exits.first()
-    val parent = IntArray(total) { -1 }
-    val queue = ArrayDeque<Int>()
-    queue.addLast(0)
-    parent[0] = 0
-    while (queue.isNotEmpty() && parent[goal] == -1) {
-        val cell = queue.removeFirst()
-        val x = cell % MAZE_SIZE
-        val y = cell / MAZE_SIZE
-        fun visit(next: Int, allowed: Boolean) {
-            if (allowed && parent[next] == -1) {
-                parent[next] = cell
-                queue.addLast(next)
-            }
-        }
-        if (y > 0) visit(cell - MAZE_SIZE, openings[cell] and MAZE_NORTH != 0)
-        if (x < MAZE_SIZE - 1) visit(cell + 1, openings[cell] and MAZE_EAST != 0)
-        if (y < MAZE_SIZE - 1) visit(cell + MAZE_SIZE, openings[cell] and MAZE_SOUTH != 0)
-        if (x > 0) visit(cell - 1, openings[cell] and MAZE_WEST != 0)
-    }
-
-    val solution = mutableListOf<Int>()
-    var cursor = goal
-    while (cursor != 0 && cursor >= 0) {
-        solution += cursor
-        cursor = parent[cursor]
-    }
-    solution += 0
-    solution.reverse()
-    val items = (1..10).mapNotNull { number ->
-        if (solution.size <= 2) null
-        else solution[(number * (solution.lastIndex.toDouble() / 11.0)).roundToLong().toInt()
-            .coerceIn(1, solution.lastIndex - 1)]
-    }.toSet()
-    return MazeLayout(openings, items, exits)
+    return MazeLayout(openings, exits)
 }
 
 @Composable
@@ -1158,7 +1123,7 @@ internal fun MazeGameView(
     state: WorkState,
     money: Long,
     reward: Long,
-    onMove: (dx: Int, dy: Int, itemId: Int?) -> Unit,
+    onMove: (dx: Int, dy: Int) -> Unit,
     onNewMaze: () -> Unit,
     onResetMoves: (cost: Long) -> Unit,
 ) {
@@ -1169,8 +1134,7 @@ internal fun MazeGameView(
     val maze = remember(state.mazeSeed) { generateMazeLayout(state.mazeSeed) }
     val today = LocalDate.now().toString()
     val usedToday = if (state.mazeMoveDate == today) state.mazeMovesToday else 0
-    val bonusToday = if (state.mazeMoveDate == today) state.mazeBonusMovesToday else 0
-    val dailyLimit = MAZE_DAILY_MOVE_LIMIT + bonusToday
+    val dailyLimit = MAZE_DAILY_MOVE_LIMIT
     val remaining = (dailyLimit - usedToday).coerceAtLeast(0)
     val currentCell = state.mazeY * MAZE_SIZE + state.mazeX
     val currentOpenings = maze.openings[currentCell]
@@ -1187,16 +1151,12 @@ internal fun MazeGameView(
         val targetX = state.mazeX + dx
         val targetY = state.mazeY + dy
         if (targetX !in 0 until MAZE_SIZE || targetY !in 0 until MAZE_SIZE) return
-        val targetCell = targetY * MAZE_SIZE + targetX
-        val itemId = targetCell.takeIf {
-            it in maze.itemCells && it !in state.mazeCollectedItems
-        }
         if (dx < 0) explorerFacing = -1
         if (dx > 0) explorerFacing = 1
         if (dx != 0) explorerShowingBack = false
         if (dy < 0) explorerShowingBack = true
         if (dy > 0) explorerShowingBack = false
-        onMove(dx, dy, itemId)
+        onMove(dx, dy)
     }
 
     Column(
@@ -1234,8 +1194,6 @@ internal fun MazeGameView(
                                 val isVisited = cellIndex in state.mazeVisitedCells
                                 val isVisible = inMap
                                 val isGoal = cellIndex in maze.exitCells
-                                val hasItem = cellIndex in maze.itemCells &&
-                                    cellIndex !in state.mazeCollectedItems
 
                                 Box(
                                     Modifier.weight(1f).fillMaxHeight()
@@ -1278,9 +1236,6 @@ internal fun MazeGameView(
                                         }
                                         if (isGoal) {
                                             Text("🏛️", style = MaterialTheme.typography.headlineLarge)
-                                        }
-                                        if (hasItem) {
-                                            Text("🔷", style = MaterialTheme.typography.headlineMedium)
                                         }
                                         if (isPlayer) {
                                             Image(
@@ -1363,16 +1318,9 @@ internal fun MazeGameView(
                 Spacer(Modifier.height(6.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     Text("👣 $remaining / $dailyLimit", fontWeight = FontWeight.ExtraBold)
-                    Text("🔷 ${state.mazeCollectedItems.size} / 10",
-                        color = Color(0xFF0277BD), fontWeight = FontWeight.ExtraBold)
                     Text("🎁 ${compactWon(reward.toDouble())}",
                         color = Color(0xFF2E7D32), fontWeight = FontWeight.ExtraBold)
                 }
-                Text(
-                    "수정 1개를 먹으면 오늘 바로 1칸 더 이동할 수 있어요.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF546E7A),
-                )
                 Spacer(Modifier.height(10.dp))
 
                 when {

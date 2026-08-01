@@ -1,7 +1,6 @@
 package es.kim.story.data
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
-import es.kim.story.MAX_PLAYER_MONEY
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -27,7 +26,6 @@ import javax.inject.Singleton
         return true
     }
     suspend fun switchAccount(userId: String) {
-        dao.convertMoneyOverflow(userId)
         prefs.edit().putString("user_id", userId).apply()
         activeUserId.value = userId
     }
@@ -65,10 +63,26 @@ import javax.inject.Singleton
         dao.sellBlueChip(
             activeUserId.value,
             BLUE_CHIP_SELL_VALUE,
-            MAX_PLAYER_MONEY - BLUE_CHIP_SELL_VALUE,
+            Long.MAX_VALUE - BLUE_CHIP_SELL_VALUE,
         ) == 1
     suspend fun buyPremiumIdColor(): Boolean =
         dao.buyPremiumIdColor(activeUserId.value, PREMIUM_ID_COLOR_COST) == 1
+    suspend fun selectPlayerTitle(title: String): Boolean =
+        dao.selectPlayerTitle(activeUserId.value, title)
+    suspend fun purchaseApartment(
+        district: String,
+        cost: Long,
+        requiredOwnedCount: Int,
+        finalStoryChapter: Int,
+    ): Boolean = dao.purchaseApartment(
+        activeUserId.value,
+        district,
+        cost,
+        requiredOwnedCount,
+        finalStoryChapter,
+    )
+    suspend fun claimApartmentRent(hourlyRent: Long): ApartmentRentPayment? =
+        dao.claimApartmentRent(activeUserId.value, hourlyRent, System.currentTimeMillis())
     suspend fun clearStoryChapter(chapter: Int, cost: Long): Boolean =
         dao.clearStoryChapter(activeUserId.value, chapter, cost) == 1
     companion object {

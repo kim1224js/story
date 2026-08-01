@@ -235,9 +235,9 @@ internal fun GambleShopView(viewModel: MainViewModel) {
                                 fontWeight = FontWeight.Bold,
                             )
                         }
-                        if (money > MAX_PLAYER_MONEY - sellValue) {
+                        if (money > Long.MAX_VALUE - sellValue) {
                             Text(
-                                "보유 게임 머니가 ${(MAX_PLAYER_MONEY - sellValue).won()} 이하일 때 바꿀 수 있어요.",
+                                "보유 게임 머니가 최대치에 가까워 되돌릴 수 없습니다.",
                                 color = Color(0xFFFFCC80),
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.Bold,
@@ -251,7 +251,7 @@ internal fun GambleShopView(viewModel: MainViewModel) {
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            enabled = blueChips >= 1L && money <= MAX_PLAYER_MONEY - sellValue,
+                            enabled = blueChips >= 1L && money <= Long.MAX_VALUE - sellValue,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFF00838F),
                                 contentColor = Color.White,

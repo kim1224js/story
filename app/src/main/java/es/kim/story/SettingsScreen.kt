@@ -137,6 +137,7 @@ internal fun SettingsView(
     var seotdaName1 by remember { mutableStateOf("") }
     var seotdaName2 by remember { mutableStateOf("") }
     var seotdaName3 by remember { mutableStateOf("") }
+    val ownedTitleIds = ownedPlayerTitleIds(user)
 
     Box(Modifier.fillMaxSize()) {
         Image(
@@ -302,6 +303,22 @@ internal fun SettingsView(
                     Modifier.fillMaxWidth().padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(9.dp),
                 ) {
+                    Text("🏅 보유 칭호 변경", fontWeight = FontWeight.ExtraBold)
+                    Text(
+                        "선택한 칭호는 프로필 아이디 위에 표시됩니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        playerTitles.filter { it.id in ownedTitleIds }.forEach { title ->
+                            FilterChip(
+                                selected = user?.selectedTitle.orEmpty() == title.id,
+                                onClick = { viewModel.selectPlayerTitle(title.id) },
+                                label = { Text("${title.icon} ${title.label}") },
+                            )
+                        }
+                    }
+                    HorizontalDivider(color = Color(0xFFE6E3DA))
                     OutlinedButton(
                         onClick = { showCompletedStories = true },
                         modifier = Modifier.fillMaxWidth(),

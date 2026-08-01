@@ -12,4 +12,7 @@ data class UserEntity(
     val seotdaName3: String = "콜라",
     val blueChips: Long = 0L,
     val premiumIdColor: Boolean = false,
+    val ownedApartmentDistricts: String = "",
+    val apartmentRentLastClaimAt: Long = 0L,
+    val selectedTitle: String = "",
 )

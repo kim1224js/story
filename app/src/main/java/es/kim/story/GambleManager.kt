@@ -670,12 +670,9 @@ class GambleManager @Inject constructor(
             val nineFourRanks = ranks.filter { it.isNineFour }
             if (nineFourRanks.isEmpty()) return false
 
-            // 다인전에서도 땡과 땡잡이가 함께 있으면 땡잡이의 특수승을 먼저 적용한다.
-            if (ranks.any { it.isDdaengCatcher } && ranks.any { it.ddaengNumber in 1..9 }) {
-                return false
-            }
-            // 암행어사와 잡을 수 있는 광땡이 함께 있으면 암행어사의 특수승을 먼저 적용한다.
-            if (ranks.any { it.isBrightCatcher } && ranks.any { it.name in CATCHABLE_BRIGHT_DDAENGS }) {
+            // 잡이패가 실제 테이블의 최고패일 때만 특수승을 재경기보다 먼저 적용한다.
+            // 예: 땡잡이와 1~9땡이 있어도 장땡이 함께 있으면 땡잡이는 활성화되지 않는다.
+            if (tableSpecialWinnerIndices(ranks).isNotEmpty()) {
                 return false
             }
 
@@ -696,7 +693,8 @@ class GambleManager @Inject constructor(
             val specialScores = buildMap<Int, Int> {
                 if (ranks.any { it.ddaengNumber in 1..9 }) {
                     ranks.indices.filter { ranks[it].isDdaengCatcher }
-                        .forEach { put(it, 9_500) }
+                        // 1~9땡보다 높고 장땡 이상에는 막히는 활성 점수다.
+                        .forEach { put(it, 8_010) }
                 }
                 if (ranks.any { it.name in CATCHABLE_BRIGHT_DDAENGS }) {
                     ranks.indices.filter { ranks[it].isBrightCatcher }

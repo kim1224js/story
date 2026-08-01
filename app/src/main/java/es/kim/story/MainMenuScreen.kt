@@ -73,6 +73,7 @@ private enum class MainMenu(val label: String, val icon: String, val title: Stri
     Puzzle("퍼즐", "🧩", "퍼즐", "블록을 맞추고 연쇄 콤보에 도전해 보세요"),
     Stock("주식", "📈", "주식", "5분마다 움직이는 가상 주식 시장이에요"),
     Story("스토리", "📖", "스토리", "나의 이야기를 진행해 보세요"),
+    Apartment("아파트", "🏙️", "서울 아파트", "서울 25개 자치구의 아파트를 모아 보세요"),
     Settings("설정", "⚙", "설정", "로컬 프로필과 캐릭터를 관리하세요"),
 }
 
@@ -98,14 +99,26 @@ internal fun MainMenuScreen(
     onSwitchAccount: (String) -> Unit,
 ) {
     var selected by remember { mutableStateOf(MainMenu.Story) }
+    var allowLoginStockNewsPopup by remember(userId) { mutableStateOf(true) }
     val user by viewModel.user.collectAsState()
     val stockState by viewModel.stockState.collectAsState()
+    val apartmentRentPayment by viewModel.apartmentRentPayment.collectAsState()
+    val storyCompleted = (user?.chapter ?: 1) > storyChapters.size
+    LaunchedEffect(storyCompleted, selected) {
+        if (storyCompleted && selected == MainMenu.Story) selected = MainMenu.Apartment
+        if (!storyCompleted && selected == MainMenu.Apartment) selected = MainMenu.Story
+    }
+    LaunchedEffect(stockState.quotes, stockState.pendingBreakingNews) {
+        if (stockState.quotes.isNotEmpty() && stockState.pendingBreakingNews.isEmpty()) {
+            allowLoginStockNewsPopup = false
+        }
+    }
     LaunchedEffect(selected, user?.chapter) {
         onBgmTrackChange(
             when (selected) {
                 MainMenu.Work -> R.raw.bgm_jaunt
                 MainMenu.Gamble -> R.raw.bgm_bells_of_winter
-                MainMenu.Puzzle, MainMenu.Stock -> R.raw.bgm_fairy_lights
+                MainMenu.Puzzle, MainMenu.Stock, MainMenu.Apartment -> R.raw.bgm_fairy_lights
                 MainMenu.Story -> if ((user?.chapter ?: 1) >= 21) {
                     R.raw.bgm_creed_of_course
                 } else {
@@ -134,7 +147,7 @@ internal fun MainMenuScreen(
                                 IdentityHeader(
                                     userId = user?.userId ?: userId,
                                     gender = user?.gender ?: "남성",
-                                    premiumIdColor = user?.premiumIdColor == true,
+                                    selectedTitle = user?.selectedTitle.orEmpty(),
                                     modifier = Modifier.fillMaxWidth(),
                                     onChangeGender = { viewModel.changeGender(user?.gender ?: "남성") },
                                 )
@@ -191,7 +204,16 @@ internal fun MainMenuScreen(
                 }
             }
         },
-        bottomBar = { BottomMenuBar(selected) { selected = it } },
+        bottomBar = {
+            BottomMenuBar(
+                selected = selected,
+                storyCompleted = storyCompleted,
+                onSelected = {
+                    selected = it
+                    if (it == MainMenu.Apartment) viewModel.checkApartmentRent()
+                },
+            )
+        },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (selected) {
@@ -201,6 +223,7 @@ internal fun MainMenuScreen(
                 MainMenu.Puzzle -> PuzzleView(viewModel)
                 MainMenu.Stock -> StockView(viewModel)
                 MainMenu.Story -> StoryView(viewModel)
+                MainMenu.Apartment -> ApartmentView(viewModel)
                 MainMenu.Settings -> SettingsView(
                     userId = userId,
                     viewModel = viewModel,
@@ -222,7 +245,9 @@ internal fun MainMenuScreen(
             }
         }
     }
-    stockState.pendingBreakingNews.firstOrNull()?.let { breaking ->
+    stockState.pendingBreakingNews.firstOrNull()
+        ?.takeIf { allowLoginStockNewsPopup || selected == MainMenu.Stock }
+        ?.let { breaking ->
         AlertDialog(
             onDismissRequest = {},
             icon = { Text("🚨", style = MaterialTheme.typography.displaySmall) },
@@ -249,15 +274,49 @@ internal fun MainMenuScreen(
             },
             confirmButton = {
                 Button(onClick = {
+                    allowLoginStockNewsPopup = false
                     viewModel.acknowledgeStockBreakingNews()
                     selected = MainMenu.Stock
                 }) { Text("주식 탭 보기") }
             },
             dismissButton = {
-                TextButton(onClick = viewModel::acknowledgeStockBreakingNews) { Text("확인") }
+                TextButton(onClick = {
+                    allowLoginStockNewsPopup = false
+                    viewModel.acknowledgeStockBreakingNews()
+                }) { Text("확인") }
             },
         )
     }
+    apartmentRentPayment
+        ?.takeIf { stockState.pendingBreakingNews.isEmpty() }
+        ?.let { payment ->
+            AlertDialog(
+                onDismissRequest = {},
+                icon = { Text("🏢", style = MaterialTheme.typography.displaySmall) },
+                title = { Text("아파트 월세 입금", fontWeight = FontWeight.ExtraBold) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("${payment.elapsedHours}시간 동안 쌓인 월세가 지급됐습니다.")
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("시간당 월세")
+                            Text(formatGameCurrency(payment.hourlyRent), fontWeight = FontWeight.Bold)
+                        }
+                        HorizontalDivider()
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("총 지급액", fontWeight = FontWeight.ExtraBold)
+                            Text(
+                                formatGameCurrency(payment.amount),
+                                color = Color(0xFF2E7D32),
+                                fontWeight = FontWeight.Black,
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = viewModel::acknowledgeApartmentRent) { Text("확인") }
+                },
+            )
+        }
 }
 
 @Composable
@@ -324,23 +383,28 @@ private fun HeaderValue(label: String, value: String, modifier: Modifier, alignm
 private fun IdentityHeader(
     userId: String,
     gender: String,
-    premiumIdColor: Boolean,
+    selectedTitle: String,
     modifier: Modifier,
     onChangeGender: () -> Unit,
 ) {
+    val gameMaster = selectedTitle == TITLE_GAME_MASTER
+    val realEstateMaster = selectedTitle == TITLE_REAL_ESTATE_MASTER
     Column(modifier) {
-        if (premiumIdColor) {
+        if (gameMaster || realEstateMaster) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    color = Color(0xFF251207),
+                    color = if (realEstateMaster) Color(0xFF062F2B) else Color(0xFF251207),
                     shape = RoundedCornerShape(6.dp),
-                    border = BorderStroke(1.dp, Color(0xFFFFC107)),
-                    shadowElevation = 2.dp,
+                    border = BorderStroke(
+                        1.dp,
+                        if (realEstateMaster) Color(0xFF80CBC4) else Color(0xFFFFC107),
+                    ),
+                    shadowElevation = 3.dp,
                 ) {
                     Text(
-                        "♠ 게임 마스터 ♠",
+                        if (realEstateMaster) "♛ 부동산 마스터 ♛" else "♠ 게임 마스터 ♠",
                         modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
-                        color = Color(0xFFFFD54F),
+                        color = if (realEstateMaster) Color(0xFFA7FFEB) else Color(0xFFFFD54F),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.ExtraBold,
                         maxLines = 1,
@@ -351,15 +415,24 @@ private fun IdentityHeader(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 userId,
-                style = if (premiumIdColor) {
+                style = if (gameMaster || realEstateMaster) {
                     MaterialTheme.typography.bodyMedium.copy(
                         brush = Brush.linearGradient(
-                            listOf(
-                                Color(0xFF7A3E00),
-                                Color(0xFFFFB300),
-                                Color(0xFFFFE082),
-                                Color(0xFFD06B00),
-                            ),
+                            if (realEstateMaster) {
+                                listOf(
+                                    Color(0xFF004D40),
+                                    Color(0xFF00A896),
+                                    Color(0xFF64FFDA),
+                                    Color(0xFF00796B),
+                                )
+                            } else {
+                                listOf(
+                                    Color(0xFF7A3E00),
+                                    Color(0xFFFFB300),
+                                    Color(0xFFFFE082),
+                                    Color(0xFFD06B00),
+                                )
+                            },
                         ),
                     )
                 } else {
@@ -456,7 +529,11 @@ private fun AnimatedMoneyHeader(
 }
 
 @Composable
-private fun BottomMenuBar(selected: MainMenu, onSelected: (MainMenu) -> Unit) {
+private fun BottomMenuBar(
+    selected: MainMenu,
+    storyCompleted: Boolean,
+    onSelected: (MainMenu) -> Unit,
+) {
     val barColor = Color(0xFFFFF4C2)
     val selectedColor = Color(0xFFFFD95A)
     val dividerColor = Color(0xFFD7C777)
@@ -467,8 +544,13 @@ private fun BottomMenuBar(selected: MainMenu, onSelected: (MainMenu) -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             visibleMenus.forEachIndexed { index, menu ->
+                val enabled = when (menu) {
+                    MainMenu.Story -> !storyCompleted
+                    MainMenu.Apartment -> storyCompleted
+                    else -> true
+                }
                 Column(
-                    Modifier.weight(1f).clickable { onSelected(menu) },
+                    Modifier.weight(1f).clickable(enabled = enabled) { onSelected(menu) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
@@ -477,9 +559,16 @@ private fun BottomMenuBar(selected: MainMenu, onSelected: (MainMenu) -> Unit) {
                             if (selected == menu) selectedColor else Color.Transparent,
                             RoundedCornerShape(12.dp),
                         ), contentAlignment = Alignment.Center,
-                    ) { Text(menu.icon, style = MaterialTheme.typography.titleMedium) }
+                    ) {
+                        Text(
+                            menu.icon,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = LocalContentColor.current.copy(alpha = if (enabled) 1f else 0.28f),
+                        )
+                    }
                     Text(menu.label, style = MaterialTheme.typography.labelSmall,
                         fontWeight = if (selected == menu) FontWeight.Bold else FontWeight.Normal,
+                        color = LocalContentColor.current.copy(alpha = if (enabled) 1f else 0.38f),
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 if (index < visibleMenus.lastIndex) {

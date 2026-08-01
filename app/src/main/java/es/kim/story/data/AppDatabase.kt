@@ -4,7 +4,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [UserEntity::class], version = 8, exportSchema = false)
+@Database(entities = [UserEntity::class], version = 11, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun userDao(): UserDao
 
@@ -54,6 +54,34 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE user ADD COLUMN blueChips INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE user ADD COLUMN premiumIdColor INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE user ADD COLUMN ownedApartmentDistricts TEXT NOT NULL DEFAULT ''",
+                )
+            }
+        }
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE user ADD COLUMN apartmentRentLastClaimAt INTEGER NOT NULL DEFAULT 0",
+                )
+            }
+        }
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE user ADD COLUMN selectedTitle TEXT NOT NULL DEFAULT ''")
+                db.execSQL(
+                    "UPDATE user SET selectedTitle = 'game_master' WHERE premiumIdColor = 1",
+                )
+                db.execSQL(
+                    "UPDATE user SET selectedTitle = 'real_estate_master' " +
+                        "WHERE selectedTitle = '' AND ownedApartmentDistricts != '' AND " +
+                        "(LENGTH(ownedApartmentDistricts) - " +
+                        "LENGTH(REPLACE(ownedApartmentDistricts, ',', '')) + 1) >= 25",
+                )
             }
         }
     }

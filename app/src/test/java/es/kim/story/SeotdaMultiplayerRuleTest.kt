@@ -27,6 +27,18 @@ class SeotdaMultiplayerRuleTest {
     }
 
     @Test
+    fun jangDdaengStillBeatsDdaengCatcherWhenLowerDdaengIsPresent() {
+        val catcher = GambleManager.rankSeotda(listOf(card(3), card(7)))
+        val lowerDdaeng = GambleManager.rankSeotda(listOf(card(9, 1), card(9, 2)))
+        val jangDdaeng = GambleManager.rankSeotda(listOf(card(10, 1), card(10, 2)))
+
+        val ranks = listOf(catcher, lowerDdaeng, jangDdaeng)
+
+        assertEquals(emptyList<Int>(), GambleManager.tableSpecialWinnerIndices(ranks))
+        assertEquals(listOf(2), GambleManager.tableWinnerIndices(ranks))
+    }
+
+    @Test
     fun undercoverInspectorCatchesThirteenAndEighteenBrightDdaeng() {
         val inspector = GambleManager.rankSeotda(listOf(card(4), card(7)))
         val thirteen = GambleManager.rankSeotda(
@@ -96,6 +108,23 @@ class SeotdaMultiplayerRuleTest {
         assertEquals(
             true,
             GambleManager.shouldReplayForNineFour(listOf(animalNineFour, jangDdaeng)),
+        )
+    }
+
+    @Test
+    fun animalNineFourStillReplaysWhenJangDdaengBlocksDdaengCatcher() {
+        val animalNineFour = GambleManager.rankSeotda(
+            listOf(card(4, animal = true), card(9, animal = true)),
+        )
+        val catcher = GambleManager.rankSeotda(listOf(card(3), card(7)))
+        val oneDdaeng = GambleManager.rankSeotda(listOf(card(1, 1), card(1, 2)))
+        val jangDdaeng = GambleManager.rankSeotda(listOf(card(10, 1), card(10, 2)))
+
+        assertEquals(
+            true,
+            GambleManager.shouldReplayForNineFour(
+                listOf(animalNineFour, catcher, oneDdaeng, jangDdaeng),
+            ),
         )
     }
 

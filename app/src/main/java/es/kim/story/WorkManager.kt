@@ -49,8 +49,6 @@ data class WorkState(
     val mazeY: Int = 0,
     val mazeMoveDate: String? = null,
     val mazeMovesToday: Int = 0,
-    val mazeBonusMovesToday: Int = 0,
-    val mazeCollectedItems: Set<Int> = emptySet(),
     val mazeVisitedCells: Set<Int> = setOf(0),
     val mazeCompleted: Boolean = false,
     val puzzleBestScore: Int = 0,
@@ -146,25 +144,19 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
         update(_state.value.copy(mazeSeed = System.currentTimeMillis()))
     }
 
-    fun moveMaze(targetX: Int, targetY: Int, itemId: Int?): Boolean {
+    fun moveMaze(targetX: Int, targetY: Int): Boolean {
         val today = LocalDate.now().toString()
         val current = _state.value
         if (current.mazeSeed == 0L || current.mazeCompleted) return false
         val movesToday = if (current.mazeMoveDate == today) current.mazeMovesToday else 0
-        val bonusToday = if (current.mazeMoveDate == today) current.mazeBonusMovesToday else 0
-        val dailyLimit = MAZE_DAILY_MOVE_LIMIT + bonusToday
+        val dailyLimit = MAZE_DAILY_MOVE_LIMIT
         if (movesToday >= dailyLimit) return false
-        val isNewItem = itemId != null && itemId !in current.mazeCollectedItems
-        val collected = if (isNewItem) current.mazeCollectedItems + itemId!!
-        else current.mazeCollectedItems
         return update(
             current.copy(
                 mazeX = targetX,
                 mazeY = targetY,
                 mazeMoveDate = today,
                 mazeMovesToday = movesToday + 1,
-                mazeBonusMovesToday = bonusToday + if (isNewItem) 1 else 0,
-                mazeCollectedItems = collected,
                 mazeVisitedCells = current.mazeVisitedCells + (targetY * MAZE_GRID_SIZE + targetX),
             ),
         )
@@ -183,7 +175,6 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
             current.copy(
                 mazeMoveDate = LocalDate.now().toString(),
                 mazeMovesToday = 0,
-                mazeBonusMovesToday = 0,
             ),
         )
     }
@@ -197,8 +188,6 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
                 mazeY = 0,
                 mazeMoveDate = null,
                 mazeMovesToday = 0,
-                mazeBonusMovesToday = 0,
-                mazeCollectedItems = emptySet(),
                 mazeVisitedCells = setOf(0),
                 mazeCompleted = false,
             ),
@@ -266,13 +255,6 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
             } else {
                 0
             },
-            mazeBonusMovesToday = if (prefs.getString(key("maze_move_date"), null) == today) {
-                prefs.getInt(key("maze_bonus_moves_today"), 0)
-            } else {
-                0
-            },
-            mazeCollectedItems = prefs.getStringSet(key("maze_collected_items"), emptySet())
-                .orEmpty().mapNotNull(String::toIntOrNull).toSet(),
             mazeVisitedCells = savedVisited + 0 + (savedMazeY * MAZE_GRID_SIZE + savedMazeX),
             mazeCompleted = prefs.getBoolean(key("maze_completed"), false),
             puzzleBestScore = prefs.getInt(key("puzzle_best_score"), 0),
@@ -301,11 +283,6 @@ class WorkManager @Inject constructor(@ApplicationContext context: Context) {
             .putInt(key("maze_y"), value.mazeY)
             .putString(key("maze_move_date"), value.mazeMoveDate)
             .putInt(key("maze_moves_today"), value.mazeMovesToday)
-            .putInt(key("maze_bonus_moves_today"), value.mazeBonusMovesToday)
-            .putStringSet(
-                key("maze_collected_items"),
-                value.mazeCollectedItems.map(Int::toString).toSet(),
-            )
             .putStringSet(
                 key("maze_visited_cells"),
                 value.mazeVisitedCells.map(Int::toString).toSet(),

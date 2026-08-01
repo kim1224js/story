@@ -95,6 +95,11 @@ val virtualStocks = listOf(
     StockDefinition("HLT008", "파이헬스", "헬스케어", 0.033, 1.4),
     StockDefinition("MOL009", "황금두더지 광업", "자원", 0.066, 2.2),
     StockDefinition("STR010", "루팡기행", "콘텐츠", 0.024, 1.6),
+    StockDefinition("MLL011", "구마네 말랑이", "생활", 0.016, 1.7),
+    StockDefinition("STL012", "불새 철강", "철강", 0.058, 1.9),
+    StockDefinition("FUN013", "누피 장례식", "장례", 0.022, 1.1),
+    StockDefinition("LAN014", "환영 랜선", "통신", 0.037, 1.5),
+    StockDefinition("NUT015", "네모 호두", "식품", 0.019, 1.4),
 )
 
 @Singleton
@@ -388,7 +393,7 @@ private fun nextStockPrice(
     }
     return (previousPrice * (1.0 + movement / 100.0))
         .roundToLong()
-        .coerceIn(100L, 80_000_000L)
+        .coerceAtLeast(100L)
 }
 
 private fun quoteFor(stock: StockDefinition, slot: Long, chapter: Int): StockQuote {
@@ -467,6 +472,34 @@ private val stockNewsProfiles = mapOf(
         positiveEvents = listOf("신규 스토리 챕터 흥행", "캐릭터 상품 예약 판매 호조", "웹툰 제작 계약 체결", "해외 콘텐츠 수출 확대", "무릉 세계관 전시회 매진"),
         negativeEvents = listOf("다음 챕터 공개 연기", "캐릭터 상품 배송 지연", "웹툰 제작 일정 재조정", "해외 서비스 심사 지연", "전시회 방문객 감소"),
     ),
+    "MLL011" to StockNewsProfile(
+        positiveEvents = listOf("신형 말랑이 완구 완판", "촉감 소재 안전 인증 획득", "어린이 체험 매장 흥행", "해외 캐릭터 상품 공급 계약", "한정판 말랑이 예약 주문 급증"),
+        negativeEvents = listOf("말랑이 원료 공급 지연", "일부 제품 품질 점검", "신제품 출시 일정 연기", "완구 매장 주문 감소", "포장재 가격 상승 부담"),
+    ),
+    "STL012" to StockNewsProfile(
+        positiveEvents = listOf("대형 조선사 후판 공급 계약", "친환경 제철 설비 가동", "철강 수출 물량 확대", "생산 원가 절감 성공", "고강도 특수강 개발 완료"),
+        negativeEvents = listOf("철광석 가격 급등", "제철소 정기 보수 연장", "해외 철강 수요 둔화", "후판 공급 계약 재협상", "생산 설비 가동률 하락"),
+    ),
+    "FUN013" to StockNewsProfile(
+        positiveEvents = listOf("전국 추모 시설 제휴 확대", "온라인 추모 서비스 이용 증가", "친환경 장례 상품 출시", "상조 서비스 만족도 1위", "신규 추모관 운영 계약"),
+        negativeEvents = listOf("신규 추모관 개장 지연", "장례용품 공급 비용 상승", "상조 서비스 해지 증가", "시설 보수 일정 연장", "온라인 추모 서비스 장애"),
+    ),
+    "LAN014" to StockNewsProfile(
+        positiveEvents = listOf("초고속 랜선 전국 공급 계약", "게임 전용망 이용자 급증", "해저 케이블 사업 수주", "통신 지연 개선 기술 특허", "기업용 네트워크 매출 신기록"),
+        negativeEvents = listOf("일부 지역 통신 장애", "해저 케이블 공사 지연", "망 유지 비용 증가", "기업용 회선 계약 감소", "신규 장비 인증 일정 연기"),
+    ),
+    "NUT015" to StockNewsProfile(
+        positiveEvents = listOf("네모 호두 과자 품절 대란", "대형 마트 납품 계약", "호두 가공 특허 등록", "건강 간식 수출 확대", "신규 농장 장기 공급 계약"),
+        negativeEvents = listOf("호두 원물 가격 상승", "일부 제품 출하 지연", "농장 수확량 전망 하향", "대형 마트 판촉 축소", "가공 공장 정기 점검 연장"),
+    ),
+)
+
+private val majorBadEvents = listOf(
+    "대규모 유상증자 결정",
+    "공매도 물량 급증",
+    "오너 리스크 확산",
+    "회계 감사 의견 거절 우려",
+    "핵심 사업 계약 전격 해지",
 )
 
 private fun newsFor(quote: StockQuote, slot: Long): StockNews {
@@ -516,14 +549,22 @@ private fun newsFor(quote: StockQuote, slot: Long): StockNews {
     }
     if (circuit != 0.0) {
         val rising = circuit > 0.0
+        val majorBadEvent = majorBadEvents[
+            (seededUnit(quote.stock.id.hashCode().toLong() xor 0xBAD_30L, slot) * majorBadEvents.size)
+                .toInt().coerceIn(majorBadEvents.indices)
+        ]
         return StockNews(
             stockId = quote.stock.id,
             stockName = quote.stock.name,
-            title = "[속보][${if (rising) "상승서킷" else "하락서킷"}] ${quote.stock.name}",
-            summary = if (rising) {
-                "희귀 급등 이벤트가 발생해 5분 전 가격보다 약 20% 상승했습니다."
+            title = if (rising) {
+                "[속보][대형 호재] $titleBody"
             } else {
-                "희귀 급락 이벤트가 발생해 5분 전 가격보다 약 20% 하락했습니다."
+                "[속보][대형 악재] $majorBadEvent"
+            },
+            summary = if (rising) {
+                "$summary 대형 호재에 매수세가 집중되며 5분 전 가격보다 약 20% 상승했습니다."
+            } else {
+                "${quote.stock.name}에 $majorBadEvent 소식이 전해지며 투매가 집중돼 5분 전 가격보다 약 30% 하락했습니다."
             },
             changePercent = quote.changePercent,
             breaking = true,
@@ -547,7 +588,7 @@ private fun circuitDirection(stockId: String, slot: Long): Double {
     if (risingChance < 0.05) return 20.0
 
     val fallingChance = seededUnit(seed xor 0x72A1_55L, slot)
-    return if (fallingChance < 0.025) -20.0 else 0.0
+    return if (fallingChance < 0.025) -30.0 else 0.0
 }
 
 private fun marketTrendDirection(slot: Long): Int {

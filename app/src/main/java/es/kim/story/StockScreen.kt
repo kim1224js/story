@@ -1,5 +1,6 @@
 package es.kim.story
 
+import android.speech.tts.TextToSpeech
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
@@ -11,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -25,10 +27,44 @@ import java.util.Locale
 internal fun StockView(viewModel: MainViewModel) {
     val state by viewModel.stockState.collectAsState()
     val user by viewModel.user.collectAsState()
+    val context = LocalContext.current
+    val ttsSettings = LocalTtsSettings.current
+    var stockTts by remember { mutableStateOf<TextToSpeech?>(null) }
+    var stockTtsReady by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableIntStateOf(0) }
     var notice by remember { mutableStateOf<String?>(null) }
     var saleResult by remember { mutableStateOf<StockSaleResult?>(null) }
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(context) {
+        val engine = TextToSpeech(context.applicationContext) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                stockTtsReady = true
+                stockTts?.let { configureAppTts(it, ttsSettings, TtsRole.Guide) }
+            }
+        }
+        stockTts = engine
+        onDispose {
+            engine.stop()
+            engine.shutdown()
+            stockTts = null
+            stockTtsReady = false
+        }
+    }
+    StopTtsOnBackground(stockTts)
+    val speakTradeResult: (String) -> Unit = { message ->
+        if (stockTtsReady && ttsSettings.enabled) {
+            stockTts?.let { engine ->
+                configureAppTts(engine, ttsSettings, TtsRole.Guide)
+                engine.speak(
+                    message,
+                    TextToSpeech.QUEUE_FLUSH,
+                    null,
+                    "stock_trade_${System.currentTimeMillis()}",
+                )
+            }
+        }
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -114,14 +150,32 @@ internal fun StockView(viewModel: MainViewModel) {
             Spacer(Modifier.height(6.dp))
         }
         when (selectedTab) {
-            0 -> PortfolioList(state, Modifier.fillMaxWidth().weight(1f))
+            0 -> PortfolioList(
+                state = state,
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                onSellAll = { quote ->
+                    viewModel.sellStock(quote.stock.id, true) { result ->
+                        if (result == null) {
+                            notice = "매도할 수 없습니다. 보유 수량과 장 운영 시간을 확인하세요."
+                        } else {
+                            notice = null
+                            saleResult = result
+                            speakTradeResult("${result.stockName} ${result.quantity}주 전량 매도를 완료했습니다.")
+                        }
+                    }
+                },
+            )
             1 -> QuoteList(
                 state = state,
+                availableMoney = user?.money ?: 0L,
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 onBuy = { quote, quantity ->
                     viewModel.buyStock(quote.stock.id, quote.price, quantity) { success ->
                         notice = if (success) "${quote.stock.name} ${quantity}주를 매수했습니다."
                         else "매수할 수 없습니다. 재화와 장 운영 시간을 확인하세요."
+                        if (success) {
+                            speakTradeResult("${quote.stock.name} ${quantity}주 매수를 완료했습니다.")
+                        }
                     }
                 },
                 onSell = { quote, sellAll ->
@@ -131,6 +185,9 @@ internal fun StockView(viewModel: MainViewModel) {
                         } else {
                             notice = null
                             saleResult = result
+                            speakTradeResult(
+                                "${result.stockName} ${result.quantity}주 매도를 완료했습니다.",
+                            )
                         }
                     }
                 },
@@ -299,7 +356,11 @@ private fun ReconnectChangeCard(
 }
 
 @Composable
-private fun PortfolioList(state: StockState, modifier: Modifier = Modifier) {
+private fun PortfolioList(
+    state: StockState,
+    modifier: Modifier = Modifier,
+    onSellAll: (StockQuote) -> Unit,
+) {
     val holdings = state.holdings.filter { it.quantity > 0 }
     var sortOrder by remember { mutableStateOf(PortfolioSortOrder.Value) }
     if (holdings.isEmpty()) {
@@ -356,18 +417,26 @@ private fun PortfolioList(state: StockState, modifier: Modifier = Modifier) {
             }
         }
         item(key = "portfolio_return_summary") {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("현재 보유 주식 수익률", fontWeight = FontWeight.ExtraBold)
-                Text(
-                    "${if (totalProfit >= 0L) "+" else ""}${stockWon(totalProfit)} " +
-                        "(${"%+.2f".format(Locale.KOREAN, totalProfitPercent)}%)",
-                    color = stockChangeColor(totalProfit.toDouble()),
-                    fontWeight = FontWeight.Black,
-                )
+            StockCard(containerColor = Color(0xFFE3F2FD)) {
+                Text("내 주식 요약", fontWeight = FontWeight.ExtraBold)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("총 구매금액")
+                    Text(stockWon(totalCost), fontWeight = FontWeight.Bold)
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("현재 평가금")
+                    Text(stockWon(totalValue), fontWeight = FontWeight.Bold)
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("총 수익금", fontWeight = FontWeight.ExtraBold)
+                    Text(
+                        "${if (totalProfit >= 0L) "+" else ""}${stockWon(totalProfit)} " +
+                            "(${"%+.2f".format(Locale.KOREAN, totalProfitPercent)}%)",
+                        color = stockChangeColor(totalProfit.toDouble()),
+                        fontWeight = FontWeight.Black,
+                    )
+                }
             }
         }
         items(sortedHoldings, key = StockHolding::stockId) { holding ->
@@ -378,7 +447,11 @@ private fun PortfolioList(state: StockState, modifier: Modifier = Modifier) {
             val profitPercent = if (cost > 0L) profit * 100.0 / cost else 0.0
             StockCard {
                 Text(quote.stock.name, fontWeight = FontWeight.ExtraBold)
-                Text("${holding.quantity}주 · 평균 ${stockWon(holding.averagePrice)}")
+                Text("${holding.quantity}주")
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("구매가 ${stockWon(holding.averagePrice)}")
+                    Text("현재가 ${stockWon(quote.price)}", fontWeight = FontWeight.Bold)
+                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("평가 ${stockWon(value)}", fontWeight = FontWeight.Bold)
                     Text(
@@ -387,6 +460,13 @@ private fun PortfolioList(state: StockState, modifier: Modifier = Modifier) {
                         color = stockChangeColor(profit.toDouble()),
                         fontWeight = FontWeight.ExtraBold,
                     )
+                }
+                OutlinedButton(
+                    onClick = { onSellAll(quote) },
+                    enabled = state.marketOpen,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("전량 매도 (${holding.quantity}주)")
                 }
             }
         }
@@ -401,13 +481,18 @@ private enum class PortfolioSortOrder {
 @Composable
 private fun QuoteList(
     state: StockState,
+    availableMoney: Long,
     modifier: Modifier = Modifier,
     onBuy: (StockQuote, Int) -> Unit,
     onSell: (StockQuote, Boolean) -> Unit,
 ) {
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         items(state.quotes, key = { it.stock.id }) { quote ->
-            val held = state.holdings.firstOrNull { it.stockId == quote.stock.id }?.quantity ?: 0
+            val holding = state.holdings.firstOrNull { it.stockId == quote.stock.id }
+            val held = holding?.quantity ?: 0
+            val tenPercentQuantity = stockBuyQuantity(availableMoney, quote.price, 10)
+            val fiftyPercentQuantity = stockBuyQuantity(availableMoney, quote.price, 50)
+            val fullQuantity = stockBuyQuantity(availableMoney, quote.price, 100)
             StockCard {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column {
@@ -415,7 +500,6 @@ private fun QuoteList(
                         Text("${quote.stock.id} · ${quote.stock.category}", style = MaterialTheme.typography.labelSmall)
                     }
                     Column(horizontalAlignment = Alignment.End) {
-                        Text(stockWon(quote.price), fontWeight = FontWeight.Black)
                         Text(
                             "%+.2f%%".format(Locale.KOREAN, quote.changePercent),
                             color = stockChangeColor(quote.changePercent),
@@ -423,17 +507,36 @@ private fun QuoteList(
                         )
                     }
                 }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(
+                        "구매가 ${holding?.averagePrice?.let(::stockWon) ?: "-"}",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text("현재가 ${stockWon(quote.price)}", fontWeight = FontWeight.Black)
+                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = { onBuy(quote, 1) },
-                        enabled = state.marketOpen,
+                        enabled = state.marketOpen && availableMoney >= quote.price,
                         modifier = Modifier.weight(1f),
-                    ) { Text("1주 매수") }
+                    ) { Text("1주") }
                     Button(
-                        onClick = { onBuy(quote, 10) },
-                        enabled = state.marketOpen,
+                        onClick = { onBuy(quote, tenPercentQuantity) },
+                        enabled = state.marketOpen && tenPercentQuantity > 0,
                         modifier = Modifier.weight(1f),
-                    ) { Text("10주 매수") }
+                    ) { Text("10%") }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { onBuy(quote, fiftyPercentQuantity) },
+                        enabled = state.marketOpen && fiftyPercentQuantity > 0,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("50%") }
+                    Button(
+                        onClick = { onBuy(quote, fullQuantity) },
+                        enabled = state.marketOpen && fullQuantity > 0,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("풀매수") }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
@@ -450,6 +553,16 @@ private fun QuoteList(
             }
         }
     }
+}
+
+internal fun stockBuyQuantity(availableMoney: Long, price: Long, percent: Int): Int {
+    if (availableMoney <= 0L || price <= 0L || percent !in 1..100) return 0
+    val budget = when (percent) {
+        100 -> availableMoney
+        else -> availableMoney / 100L * percent +
+            (availableMoney % 100L) * percent / 100L
+    }
+    return (budget / price).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
 }
 
 @Composable
@@ -530,7 +643,7 @@ private fun StockCard(
 }
 
 internal fun stockWon(value: Long): String =
-    formatGameCurrency(value)
+    formatSignedGameCurrency(value)
 
 private fun stockChangeColor(value: Double): Color = when {
     value > 0 -> Color(0xFFD32F2F)

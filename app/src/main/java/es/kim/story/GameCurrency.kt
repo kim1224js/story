@@ -1,8 +1,8 @@
 package es.kim.story
 
 import java.text.NumberFormat
+import java.math.BigInteger
 import java.util.Locale
-import kotlin.math.abs
 import kotlin.math.roundToLong
 
 /**
@@ -13,26 +13,36 @@ import kotlin.math.roundToLong
  * 1 다이아 = 10,000 루비
  */
 internal fun formatGameCurrency(amount: Long): String =
-    formatGameCurrency(amount.toDouble())
+    formatGameCurrencyUnits(amount.coerceAtLeast(0L))
 
-internal fun formatGameCurrency(amount: Double): String {
-    val absolute = abs(amount)
-    val (divisor, unit) = when {
-        absolute >= 1_000_000_000_000.0 -> 1_000_000_000_000.0 to "다이아"
-        absolute >= 100_000_000.0 -> 100_000_000.0 to "루비"
-        absolute >= 10_000.0 -> 10_000.0 to "골드"
-        else -> return "${NumberFormat.getNumberInstance(Locale.KOREA).format(amount.roundToLong())} 실버"
-    }
+internal fun formatGameCurrency(amount: Double): String =
+    formatGameCurrencyUnits(amount.coerceAtLeast(0.0).roundToLong())
 
-    val scaled = amount / divisor
-    val maximumFractionDigits = when {
-        abs(scaled) >= 100.0 -> 0
-        abs(scaled) >= 10.0 -> 1
-        else -> 2
+internal fun formatSignedGameCurrency(amount: Long): String =
+    formatGameCurrencyUnits(amount)
+
+private fun formatGameCurrencyUnits(amount: Long): String {
+    val magnitude = BigInteger.valueOf(amount).abs()
+    val units = listOf(
+        Triple(BigInteger.valueOf(1_000_000_000_000L), "다이아", BigInteger.valueOf(100_000_000L)),
+        Triple(BigInteger.valueOf(100_000_000L), "루비", BigInteger.valueOf(10_000L)),
+        Triple(BigInteger.valueOf(10_000L), "골드", BigInteger.ONE),
+    )
+    val selected = units.firstOrNull { magnitude >= it.first }
+        ?: return "${formatCurrencyNumber(BigInteger.valueOf(amount))}실버"
+    val (primaryDivisor, primaryUnit, secondaryDivisor) = selected
+    val primary = magnitude / primaryDivisor
+    val secondary = magnitude.mod(primaryDivisor) / secondaryDivisor
+    val secondaryUnit = when (primaryUnit) {
+        "다이아" -> "루비"
+        "루비" -> "골드"
+        else -> "실버"
     }
-    val formatted = NumberFormat.getNumberInstance(Locale.KOREA).apply {
-        minimumFractionDigits = 0
-        this.maximumFractionDigits = maximumFractionDigits
-    }.format(scaled)
-    return "$formatted $unit"
+    val sign = if (amount < 0L) "-" else ""
+    val primaryText = "$sign${formatCurrencyNumber(primary)}$primaryUnit"
+    return if (secondary == BigInteger.ZERO) primaryText
+    else "$primaryText ${formatCurrencyNumber(secondary)}$secondaryUnit"
 }
+
+private fun formatCurrencyNumber(value: BigInteger): String =
+    NumberFormat.getNumberInstance(Locale.KOREA).format(value)

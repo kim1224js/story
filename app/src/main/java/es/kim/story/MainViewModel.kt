@@ -3,7 +3,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import es.kim.story.data.UserRepository
+import es.kim.story.data.ApartmentRentPayment
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -23,6 +26,8 @@ import javax.inject.Inject
     val seotdaState = gambleManager.seotdaState
     val threeCardSeotdaState = gambleManager.threeCardSeotdaState
     val stockState = stockManager.state
+    private val _apartmentRentPayment = MutableStateFlow<ApartmentRentPayment?>(null)
+    val apartmentRentPayment = _apartmentRentPayment.asStateFlow()
     init {
         viewModelScope.launch {
             user.filterNotNull().collect {
@@ -34,6 +39,7 @@ import javax.inject.Inject
                     listOf(it.seotdaName1, it.seotdaName2, it.seotdaName3),
                     it.chapter,
                 )
+                claimApartmentRent(it.ownedApartmentDistricts)
             }
         }
     }
@@ -77,8 +83,8 @@ import javax.inject.Inject
     fun startIceGame(): Boolean = workManager.startIceGame()
     fun breakIce(index: Int): IceBreakResult? = workManager.breakIce(index)
     fun ensureMaze() = workManager.ensureMaze()
-    fun moveMaze(targetX: Int, targetY: Int, itemId: Int?): Boolean =
-        workManager.moveMaze(targetX, targetY, itemId)
+    fun moveMaze(targetX: Int, targetY: Int): Boolean =
+        workManager.moveMaze(targetX, targetY)
     fun completeMaze(reward: Long) {
         if (reward <= 0 || !workManager.completeMaze()) return
         val currentUser = user.value ?: return
@@ -180,6 +186,34 @@ import javax.inject.Inject
         if (repository.sellBlueChip()) onSuccess()
     }
     fun buyPremiumIdColor() = viewModelScope.launch { repository.buyPremiumIdColor() }
+    fun selectPlayerTitle(title: String) = viewModelScope.launch {
+        repository.selectPlayerTitle(title)
+    }
+    internal fun purchaseApartment(
+        apartment: SeoulApartment,
+        onResult: (Boolean) -> Unit = {},
+    ) = viewModelScope.launch {
+        onResult(
+            repository.purchaseApartment(
+                district = apartment.district,
+                cost = apartment.blueChipCost,
+                requiredOwnedCount = apartment.requiredOwnedCount,
+                finalStoryChapter = storyChapters.size,
+            ),
+        )
+    }
+    fun checkApartmentRent() = viewModelScope.launch {
+        claimApartmentRent(user.value?.ownedApartmentDistricts.orEmpty())
+    }
+    fun acknowledgeApartmentRent() {
+        _apartmentRentPayment.value = null
+    }
+    private suspend fun claimApartmentRent(ownedDistricts: String) {
+        val owned = ownedDistricts.split(',').filter(String::isNotBlank).toSet()
+        val hourlyRent = apartmentHourlyRent(owned)
+        if (hourlyRent <= 0L) return
+        repository.claimApartmentRent(hourlyRent)?.let { _apartmentRentPayment.value = it }
+    }
     fun clearStoryChapter(chapter: Int, cost: Long) = viewModelScope.launch {
         repository.clearStoryChapter(chapter, cost)
     }
