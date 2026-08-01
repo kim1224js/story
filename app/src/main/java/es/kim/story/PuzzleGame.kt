@@ -13,8 +13,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -124,7 +122,6 @@ fun PuzzleGameView(
     var ttsReady by remember { mutableStateOf(false) }
     StopTtsOnBackground(tts)
     val scope = rememberCoroutineScope()
-    val puzzleScrollState = rememberScrollState()
     val tones = remember(gameAudioVolume) {
         ToneGenerator(AudioManager.STREAM_MUSIC, (gameAudioVolume * 100).roundToInt())
     }
@@ -162,7 +159,6 @@ fun PuzzleGameView(
 
     LaunchedEffect(gameRound) {
         if (gameRound == 0) return@LaunchedEffect
-        puzzleScrollState.animateScrollTo(0)
         secondsLeft = 60
         countdown = 3
         gamePhase = PuzzlePhase.Countdown
@@ -334,21 +330,19 @@ fun PuzzleGameView(
     }
 
     Column(
-        modifier = modifier.fillMaxSize()
-            .verticalScroll(
-                state = puzzleScrollState,
-                enabled = gamePhase == PuzzlePhase.Waiting || gamePhase == PuzzlePhase.Finished,
-            )
-            .padding(horizontal = 4.dp, vertical = 2.dp),
+        modifier = modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().weight(1f),
             colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3D5)),
             shape = RoundedCornerShape(22.dp),
             border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFFFFB74D)),
         ) {
-            Column(Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(
+                Modifier.fillMaxSize().padding(14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     Text("점수 $score", fontWeight = FontWeight.Bold)
                     Text(
@@ -381,11 +375,16 @@ fun PuzzleGameView(
                 Spacer(Modifier.height(12.dp))
 
                 BoxWithConstraints(
-                    Modifier.fillMaxWidth().aspectRatio(1f).background(
-                        Color(0xFFFFE0B2), RoundedCornerShape(16.dp),
-                    ).border(3.dp, Color(0xFFFFB74D), RoundedCornerShape(16.dp)).padding(5.dp),
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    val tileStep = (maxWidth - 21.dp) / PUZZLE_SIZE
+                    val boardSize = minOf(maxWidth, maxHeight)
+                    Box(
+                        Modifier.size(boardSize).background(
+                            Color(0xFFFFE0B2), RoundedCornerShape(16.dp),
+                        ).border(3.dp, Color(0xFFFFB74D), RoundedCornerShape(16.dp)).padding(5.dp),
+                    ) {
+                    val tileStep = (boardSize - 21.dp) / PUZZLE_SIZE
                     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         repeat(PUZZLE_SIZE) { row ->
                             Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -435,6 +434,7 @@ fun PuzzleGameView(
                                 textAlign = TextAlign.Center,
                             )
                         }
+                    }
                     }
                 }
                 Spacer(Modifier.height(12.dp))
