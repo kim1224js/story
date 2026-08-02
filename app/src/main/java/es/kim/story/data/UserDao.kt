@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.Flow
     @Query("SELECT * FROM user WHERE userId = :userId") fun observeUser(userId: String): Flow<UserEntity?>
     @Query("SELECT * FROM user ORDER BY userId") fun observeAllUsers(): Flow<List<UserEntity>>
     @Query("SELECT * FROM user WHERE userId = :userId") suspend fun getUser(userId: String): UserEntity?
+    @Query("SELECT * FROM user ORDER BY userId") suspend fun getAllUsers(): List<UserEntity>
     @Query("SELECT COUNT(*) FROM user") suspend fun userCount(): Int
     @Upsert suspend fun save(user: UserEntity)
     @Query("DELETE FROM user WHERE userId = :userId")
@@ -40,23 +41,38 @@ import kotlinx.coroutines.flow.Flow
     suspend fun setApartmentRentLastClaimAt(userId: String, claimedAt: Long)
     @Query("UPDATE user SET selectedTitle = :title WHERE userId = :userId")
     suspend fun setSelectedTitle(userId: String, title: String)
+    @Query(
+        "UPDATE user SET heroTitleUnlocked = 1, " +
+            "selectedTitle = CASE WHEN selectedTitle = '' THEN 'hero' ELSE selectedTitle END " +
+            "WHERE userId = :userId",
+    )
+    suspend fun unlockHeroTitle(userId: String): Int
 
     @Transaction
     suspend fun purchaseApartment(
         userId: String,
         district: String,
         cost: Long,
+        blueChipExchangeCost: Long,
         requiredOwnedCount: Int,
-        finalStoryChapter: Int,
     ): Boolean {
         val current = getUser(userId) ?: return false
         val owned = current.ownedApartmentDistricts.split(',').filter(String::isNotBlank)
-        if (current.chapter <= finalStoryChapter || district in owned ||
-            owned.size < requiredOwnedCount || cost <= 0L
+        val districtCount = owned.count { it == district }
+        val distinctOwnedCount = owned.toSet().size
+        if (districtCount >= 50 || distinctOwnedCount < requiredOwnedCount ||
+            cost <= 0L || blueChipExchangeCost <= 0L
         ) return false
+        val missingBlueChips = (cost - current.blueChips).coerceAtLeast(0L)
+        if (missingBlueChips > 0L) {
+            if (missingBlueChips > Long.MAX_VALUE / blueChipExchangeCost) return false
+            val exchangeMoneyCost = missingBlueChips * blueChipExchangeCost
+            if (spendMoney(userId, exchangeMoneyCost) != 1) return false
+            addBlueChips(userId, missingBlueChips)
+        }
         if (spendBlueChips(userId, cost) != 1) return false
         setOwnedApartmentDistricts(userId, (owned + district).joinToString(","))
-        if (owned.size + 1 >= 25 && current.selectedTitle.isBlank()) {
+        if ((owned + district).toSet().size >= 25 && current.selectedTitle.isBlank()) {
             setSelectedTitle(userId, "real_estate_master")
         }
         if (current.apartmentRentLastClaimAt <= 0L) {
@@ -110,10 +126,11 @@ import kotlinx.coroutines.flow.Flow
     @Transaction
     suspend fun selectPlayerTitle(userId: String, title: String): Boolean {
         val current = getUser(userId) ?: return false
-        val apartmentCount = current.ownedApartmentDistricts.split(',').count(String::isNotBlank)
+        val apartmentCount = current.ownedApartmentDistricts.split(',').filter(String::isNotBlank).toSet().size
         val allowed = title.isBlank() ||
             (title == "game_master" && current.premiumIdColor) ||
-            (title == "real_estate_master" && apartmentCount >= 25)
+            (title == "real_estate_master" && apartmentCount >= 25) ||
+            (title == "hero" && current.heroTitleUnlocked)
         if (!allowed) return false
         setSelectedTitle(userId, title)
         return true
@@ -123,6 +140,16 @@ import kotlinx.coroutines.flow.Flow
             "WHERE userId = :userId AND chapter = :chapter AND money >= :cost",
     )
     suspend fun clearStoryChapter(userId: String, chapter: Int, cost: Long): Int
+
+    @Query("""
+        SELECT (money + (blueChips * 10000) + (chapter * 1000000)) 
+        FROM user 
+        LIMIT 1
+    """)
+    suspend fun getTotalScore(): Long?
+
+    @Query("SELECT * FROM user LIMIT 1")
+    suspend fun getUser(): UserEntity?
 
     @Transaction
     suspend fun settleGamble(userId: String, wager: Long, payout: Long): Boolean {

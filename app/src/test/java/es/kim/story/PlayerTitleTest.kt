@@ -24,4 +24,10 @@ class PlayerTitleTest {
             owned,
         )
     }
+
+    @Test
+    fun heroTitleRequiresDemonWorldVictoryUnlock() {
+        assertTrue(TITLE_HERO !in ownedPlayerTitleIds(UserEntity(userId = "locked")))
+        assertTrue(TITLE_HERO in ownedPlayerTitleIds(UserEntity(userId = "hero", heroTitleUnlocked = true)))
+    }
 }

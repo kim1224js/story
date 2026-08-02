@@ -20,6 +20,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -72,8 +73,8 @@ private enum class MainMenu(val label: String, val icon: String, val title: Stri
     Gamble("게임", "🎲", "미니게임", "게임 머니로 즐기는 카드와 승부 게임"),
     Puzzle("퍼즐", "🧩", "퍼즐", "블록을 맞추고 연쇄 콤보에 도전해 보세요"),
     Stock("주식", "📈", "주식", "5분마다 움직이는 가상 주식 시장이에요"),
-    Story("스토리", "📖", "스토리", "나의 이야기를 진행해 보세요"),
     Apartment("아파트", "🏙️", "서울 아파트", "서울 25개 자치구의 아파트를 모아 보세요"),
+    Rpg("RPG", "⚔️", "원정 RPG", "캐릭터를 성장시키고 장비를 강화하세요"),
     Settings("설정", "⚙", "설정", "로컬 프로필과 캐릭터를 관리하세요"),
 }
 
@@ -98,32 +99,25 @@ internal fun MainMenuScreen(
     onLogout: () -> Unit,
     onSwitchAccount: (String) -> Unit,
 ) {
-    var selected by remember { mutableStateOf(MainMenu.Story) }
+    var selected by remember { mutableStateOf(MainMenu.Apartment) }
     var allowLoginStockNewsPopup by remember(userId) { mutableStateOf(true) }
     val user by viewModel.user.collectAsState()
     val stockState by viewModel.stockState.collectAsState()
-    val apartmentRentPayment by viewModel.apartmentRentPayment.collectAsState()
-    val storyCompleted = (user?.chapter ?: 1) > storyChapters.size
-    LaunchedEffect(storyCompleted, selected) {
-        if (storyCompleted && selected == MainMenu.Story) selected = MainMenu.Apartment
-        if (!storyCompleted && selected == MainMenu.Apartment) selected = MainMenu.Story
+    val rpgState by viewModel.rpgState.collectAsState()
+    val ownedApartments = remember(user?.ownedApartmentDistricts) {
+        user?.ownedApartmentDistricts.orEmpty().split(',').filter(String::isNotBlank)
     }
     LaunchedEffect(stockState.quotes, stockState.pendingBreakingNews) {
         if (stockState.quotes.isNotEmpty() && stockState.pendingBreakingNews.isEmpty()) {
             allowLoginStockNewsPopup = false
         }
     }
-    LaunchedEffect(selected, user?.chapter) {
+    LaunchedEffect(selected) {
         onBgmTrackChange(
             when (selected) {
                 MainMenu.Work -> R.raw.bgm_jaunt
                 MainMenu.Gamble -> R.raw.bgm_bells_of_winter
-                MainMenu.Puzzle, MainMenu.Stock, MainMenu.Apartment -> R.raw.bgm_fairy_lights
-                MainMenu.Story -> if ((user?.chapter ?: 1) >= 21) {
-                    R.raw.bgm_creed_of_course
-                } else {
-                    R.raw.bgm_wandering_woodlands
-                }
+                MainMenu.Puzzle, MainMenu.Stock, MainMenu.Apartment, MainMenu.Rpg -> R.raw.bgm_fairy_lights
                 MainMenu.Settlement, MainMenu.Settings -> R.raw.bgm_fairy_lights
             },
         )
@@ -159,13 +153,8 @@ internal fun MainMenuScreen(
                                 accentColor = Color(0xFFD81B60),
                             ) {
                                 HeaderValue(
-                                    "스토리 챕터",
-                                    if ((user?.chapter ?: 1) > storyChapters.size) {
-                                        "STORY ${(storyChapters.size - 1) / 10 + 1} 완료"
-                                    } else {
-                                        val progress = user?.chapter ?: 1
-                                        "STORY ${(progress - 1) / 10 + 1} · CH.${(progress - 1) % 10 + 1}"
-                                    },
+                                    "아파트 월세",
+                                    "시간당 ${formatGameCurrency(apartmentHourlyRent(ownedApartments))}",
                                     Modifier.fillMaxWidth(),
                                     TextAlign.Center,
                                 )
@@ -189,13 +178,16 @@ internal fun MainMenuScreen(
                             border = BorderStroke(1.dp, Color(0xFF90CAF9)),
                         ) {
                             Text(
-                                if (selected == MainMenu.Story) "스토리"
-                                else "${selected.title} - ${selected.description}",
+                                if (selected == MainMenu.Rpg) {
+                                    "RPG 공용지갑 ${formatGameCurrency(rpgState.walletBalance)}"
+                                } else {
+                                    "${selected.title} - ${selected.description}"
+                                },
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = Color(0xFF263238),
-                                textAlign = if (selected == MainMenu.Story) TextAlign.Center else TextAlign.Start,
+                                textAlign = TextAlign.Start,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -207,10 +199,8 @@ internal fun MainMenuScreen(
         bottomBar = {
             BottomMenuBar(
                 selected = selected,
-                storyCompleted = storyCompleted,
                 onSelected = {
                     selected = it
-                    if (it == MainMenu.Apartment) viewModel.checkApartmentRent()
                 },
             )
         },
@@ -222,8 +212,8 @@ internal fun MainMenuScreen(
                 MainMenu.Gamble -> GambleView(viewModel)
                 MainMenu.Puzzle -> PuzzleView(viewModel)
                 MainMenu.Stock -> StockView(viewModel)
-                MainMenu.Story -> StoryView(viewModel)
                 MainMenu.Apartment -> ApartmentView(viewModel)
+                MainMenu.Rpg -> RpgView(viewModel)
                 MainMenu.Settings -> SettingsView(
                     userId = userId,
                     viewModel = viewModel,
@@ -287,36 +277,6 @@ internal fun MainMenuScreen(
             },
         )
     }
-    apartmentRentPayment
-        ?.takeIf { stockState.pendingBreakingNews.isEmpty() }
-        ?.let { payment ->
-            AlertDialog(
-                onDismissRequest = {},
-                icon = { Text("🏢", style = MaterialTheme.typography.displaySmall) },
-                title = { Text("아파트 월세 입금", fontWeight = FontWeight.ExtraBold) },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("${payment.elapsedHours}시간 동안 쌓인 월세가 지급됐습니다.")
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("시간당 월세")
-                            Text(formatGameCurrency(payment.hourlyRent), fontWeight = FontWeight.Bold)
-                        }
-                        HorizontalDivider()
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("총 지급액", fontWeight = FontWeight.ExtraBold)
-                            Text(
-                                formatGameCurrency(payment.amount),
-                                color = Color(0xFF2E7D32),
-                                fontWeight = FontWeight.Black,
-                            )
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(onClick = viewModel::acknowledgeApartmentRent) { Text("확인") }
-                },
-            )
-        }
 }
 
 @Composable
@@ -389,7 +349,25 @@ private fun IdentityHeader(
 ) {
     val gameMaster = selectedTitle == TITLE_GAME_MASTER
     val realEstateMaster = selectedTitle == TITLE_REAL_ESTATE_MASTER
+    val hero = selectedTitle == TITLE_HERO
     Column(modifier) {
+        if (hero) {
+            Surface(
+                color = Color(0xFF311B5B),
+                shape = RoundedCornerShape(6.dp),
+                border = BorderStroke(1.dp, Color(0xFFCE93D8)),
+                shadowElevation = 3.dp,
+            ) {
+                Text(
+                    "⚔️ [용사]",
+                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                    color = Color(0xFFE1BEE7),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
+                )
+            }
+        }
         if (gameMaster || realEstateMaster) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
@@ -531,7 +509,6 @@ private fun AnimatedMoneyHeader(
 @Composable
 private fun BottomMenuBar(
     selected: MainMenu,
-    storyCompleted: Boolean,
     onSelected: (MainMenu) -> Unit,
 ) {
     val barColor = Color(0xFFFFF4C2)
@@ -540,17 +517,13 @@ private fun BottomMenuBar(
     val visibleMenus = MainMenu.entries
     Surface(color = barColor, shadowElevation = 10.dp, tonalElevation = 0.dp) {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 8.dp, vertical = 4.dp),
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                .heightIn(min = 64.dp).padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             visibleMenus.forEachIndexed { index, menu ->
-                val enabled = when (menu) {
-                    MainMenu.Story -> !storyCompleted
-                    MainMenu.Apartment -> storyCompleted
-                    else -> true
-                }
                 Column(
-                    Modifier.weight(1f).clickable(enabled = enabled) { onSelected(menu) },
+                    Modifier.width(68.dp).clickable { onSelected(menu) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
@@ -563,12 +536,12 @@ private fun BottomMenuBar(
                         Text(
                             menu.icon,
                             style = MaterialTheme.typography.titleMedium,
-                            color = LocalContentColor.current.copy(alpha = if (enabled) 1f else 0.28f),
+                            color = LocalContentColor.current,
                         )
                     }
                     Text(menu.label, style = MaterialTheme.typography.labelSmall,
                         fontWeight = if (selected == menu) FontWeight.Bold else FontWeight.Normal,
-                        color = LocalContentColor.current.copy(alpha = if (enabled) 1f else 0.38f),
+                        color = LocalContentColor.current,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 if (index < visibleMenus.lastIndex) {

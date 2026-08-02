@@ -2,6 +2,7 @@ package es.kim.story
 
 import android.os.Bundle
 import android.media.MediaPlayer
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -31,17 +32,78 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.lifecycleScope
+import com.google.android.gms.games.PlayGames
+import com.google.android.gms.games.PlayGamesSdk
 import dagger.hilt.android.AndroidEntryPoint
 import es.kim.story.ui.theme.ProjectSTheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import es.kim.story.data.AppDatabase
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    @Inject
+    lateinit var appDatabase: AppDatabase
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.decorView.setBackgroundColor(android.graphics.Color.WHITE)
         enableEdgeToEdge()
+        PlayGamesSdk.initialize(this)
         setContent { ProjectSTheme { StoryApp() } }
+
+        val gamesSignInClient = PlayGames.getGamesSignInClient(this)
+
+        // 1. 자동 로그인 확인
+        gamesSignInClient.isAuthenticated.addOnCompleteListener { task ->
+            val isAuthenticated = task.isSuccessful && task.result.isAuthenticated
+
+            if (isAuthenticated) {
+                // 자동 로그인 성공
+                Toast.makeText(this,"자동 로그인 성공" , Toast.LENGTH_SHORT).show()
+
+            } else {
+                // 💡 자동 로그인 실패 시 수동 로그인 창(팝업)을 강제로 띄움!
+                gamesSignInClient.signIn().addOnCompleteListener { signInTask ->
+                    if (signInTask.isSuccessful && signInTask.result.isAuthenticated) {
+                        // 수동 로그인 성공!
+                        Toast.makeText(this,"로그인 성공" , Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(this,"로그인 실패" , Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+
+
+        // 앱이 시작될때 최신 DB 데이터로 점수 계산 후 구글 서버에 제출
+        lifecycleScope.launch {
+            val user = appDatabase.userDao().getUser()
+            if (user != null) {
+                val totalScore = calculateTotalScore(user)
+                submitScoreToGoogleLeaderboard(this@MainActivity, totalScore)
+            }
+        }
+
+    }
+
+    override fun onStop() {
+        super.onStop()
+
+        // 앱이 백그라운드로 전환될 때 최신 DB 데이터로 점수 계산 후 구글 서버에 제출
+        lifecycleScope.launch {
+            try {
+                val user = appDatabase.userDao().getUser()
+                if (user != null) {
+                    val totalScore = calculateTotalScore(user)
+                    submitScoreToGoogleLeaderboard(this@MainActivity, totalScore)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 }
 private enum class Screen { Splash, Login, Home, Switching }

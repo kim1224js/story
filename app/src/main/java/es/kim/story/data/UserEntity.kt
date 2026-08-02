@@ -15,4 +15,5 @@ data class UserEntity(
     val ownedApartmentDistricts: String = "",
     val apartmentRentLastClaimAt: Long = 0L,
     val selectedTitle: String = "",
+    val heroTitleUnlocked: Boolean = false,
 )

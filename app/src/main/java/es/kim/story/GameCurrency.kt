@@ -1,7 +1,10 @@
 package es.kim.story
 
 import java.text.NumberFormat
+import java.text.DecimalFormat
+import java.math.BigDecimal
 import java.math.BigInteger
+import java.math.RoundingMode
 import java.util.Locale
 import kotlin.math.roundToLong
 
@@ -24,24 +27,21 @@ internal fun formatSignedGameCurrency(amount: Long): String =
 private fun formatGameCurrencyUnits(amount: Long): String {
     val magnitude = BigInteger.valueOf(amount).abs()
     val units = listOf(
-        Triple(BigInteger.valueOf(1_000_000_000_000L), "다이아", BigInteger.valueOf(100_000_000L)),
-        Triple(BigInteger.valueOf(100_000_000L), "루비", BigInteger.valueOf(10_000L)),
-        Triple(BigInteger.valueOf(10_000L), "골드", BigInteger.ONE),
+        BigInteger.valueOf(1_000_000_000_000L) to "다이아",
+        BigInteger.valueOf(100_000_000L) to "루비",
+        BigInteger.valueOf(10_000L) to "골드",
     )
     val selected = units.firstOrNull { magnitude >= it.first }
         ?: return "${formatCurrencyNumber(BigInteger.valueOf(amount))}실버"
-    val (primaryDivisor, primaryUnit, secondaryDivisor) = selected
-    val primary = magnitude / primaryDivisor
-    val secondary = magnitude.mod(primaryDivisor) / secondaryDivisor
-    val secondaryUnit = when (primaryUnit) {
-        "다이아" -> "루비"
-        "루비" -> "골드"
-        else -> "실버"
-    }
+    val (primaryDivisor, primaryUnit) = selected
+    val primary = BigDecimal(magnitude).divide(BigDecimal(primaryDivisor), 1, RoundingMode.HALF_UP)
     val sign = if (amount < 0L) "-" else ""
-    val primaryText = "$sign${formatCurrencyNumber(primary)}$primaryUnit"
-    return if (secondary == BigInteger.ZERO) primaryText
-    else "$primaryText ${formatCurrencyNumber(secondary)}$secondaryUnit"
+    val formatter = (NumberFormat.getNumberInstance(Locale.KOREA) as DecimalFormat).apply {
+        minimumFractionDigits = 0
+        maximumFractionDigits = 1
+        roundingMode = RoundingMode.HALF_UP
+    }
+    return "$sign${formatter.format(primary)}$primaryUnit"
 }
 
 private fun formatCurrencyNumber(value: BigInteger): String =

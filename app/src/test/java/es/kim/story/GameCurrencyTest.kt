@@ -5,10 +5,11 @@ import org.junit.Test
 
 class GameCurrencyTest {
     @Test
-    fun displaysPrimaryAndSecondaryCurrencyUnits() {
-        assertEquals("1루비 50골드", formatGameCurrency(100_500_000L))
-        assertEquals("2골드 350실버", formatGameCurrency(20_350L))
-        assertEquals("1다이아 25루비", formatGameCurrency(1_002_500_000_000L))
+    fun displaysLargestCurrencyUnitWithAtMostOneDecimalPlace() {
+        assertEquals("1루비", formatGameCurrency(100_500_000L))
+        assertEquals("2골드", formatGameCurrency(20_350L))
+        assertEquals("1다이아", formatGameCurrency(1_002_500_000_000L))
+        assertEquals("89.1루비", formatGameCurrency(8_910_000_000L))
     }
 
     @Test
@@ -20,6 +21,6 @@ class GameCurrencyTest {
 
     @Test
     fun keepsNegativeSignOnlyForSignedProfitAndLossFormatting() {
-        assertEquals("-1루비 50골드", formatSignedGameCurrency(-100_500_000L))
+        assertEquals("-1루비", formatSignedGameCurrency(-100_500_000L))
     }
 }

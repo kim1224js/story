@@ -1,5 +1,6 @@
 package es.kim.story
 
+import android.app.Activity
 import android.content.Intent
 import android.media.AudioManager
 import android.media.SoundPool
@@ -10,6 +11,10 @@ import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.util.Log
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -51,6 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.google.android.gms.games.PlayGames
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -132,6 +138,11 @@ internal fun SettingsView(
     var showSeotdaNames by remember { mutableStateOf(false) }
     var showCompletedStories by remember { mutableStateOf(false) }
     var showPrivacyPolicy by remember { mutableStateOf(false) }
+    var showCouponInput by remember { mutableStateOf(false) }
+    var couponCode by remember { mutableStateOf("") }
+    var couponResult by remember { mutableStateOf<CouponRedeemResult?>(null) }
+    var couponReward by remember { mutableStateOf<Long?>(null) }
+    var couponSubmitting by remember { mutableStateOf(false) }
     var replayChapter by remember { mutableStateOf<StoryChapter?>(null) }
     var deleteTarget by remember { mutableStateOf<String?>(null) }
     var seotdaName1 by remember { mutableStateOf("") }
@@ -319,6 +330,109 @@ internal fun SettingsView(
                         }
                     }
                     HorizontalDivider(color = Color(0xFFE6E3DA))
+
+                    OutlinedButton(
+                        onClick = {
+                            couponCode = ""
+                            couponResult = null
+                            couponReward = null
+                            couponSubmitting = false
+                            showCouponInput = true
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                    ) {
+                        Text(
+                            "🎁  쿠폰 입력",
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Start,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    HorizontalDivider(color = Color(0xFFE6E3DA))
+
+                    // =========================================================
+                    // 🏆 구글 플레이 랭킹보기 버튼 추가
+                    // =========================================================
+                    val context = LocalContext.current
+                    val leaderboardLauncher = rememberLauncherForActivityResult(
+                        contract = ActivityResultContracts.StartActivityForResult(),
+                    ) { result ->
+                        Log.d("PlayGames", "리더보드 화면 종료: resultCode=${result.resultCode}")
+                    }
+
+                    Button(
+                        onClick = {
+                            val activity = (context as? Activity) ?: run {
+                                Toast.makeText(context, "Activity 컨텍스트를 찾을 수 없습니다.", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+
+                            // Play Console에 등록된 ID를 strings.xml 한 곳에서만 관리한다.
+                            // 기존 하드코딩 값에는 'J'가 하나 더 들어가 있어 화면 요청이 실패했다.
+                            val leaderboardId = context.getString(R.string.leaderboard_id)
+                            val gamesSignInClient = PlayGames.getGamesSignInClient(activity)
+                            val leaderboardsClient = PlayGames.getLeaderboardsClient(activity)
+
+                            fun openLeaderboard() {
+                                user?.let { currentUser ->
+                                    val totalScore = viewModel.calculateTotalScore(currentUser)
+                                    leaderboardsClient.submitScore(leaderboardId, totalScore)
+                                }
+
+                                leaderboardsClient.getLeaderboardIntent(leaderboardId)
+                                    .addOnSuccessListener { intent ->
+                                        // Play Games UI는 호출 앱의 신원 확인을 위해
+                                        // 반드시 Activity Result 방식으로 실행해야 한다.
+                                        leaderboardLauncher.launch(intent)
+                                    }
+                                    .addOnFailureListener { e ->
+                                        Log.e("PlayGames", "리더보드 화면 실행 실패", e)
+                                        Toast.makeText(context, "랭킹을 불러올 수 없습니다: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                                    }
+                            }
+
+                            gamesSignInClient.isAuthenticated.addOnCompleteListener { task ->
+                                val isAuthenticated = task.isSuccessful && task.result.isAuthenticated
+                                Log.d("PlayGames", "로그인 상태: $isAuthenticated")
+
+                                if (isAuthenticated) {
+                                    openLeaderboard()
+                                } else {
+                                    gamesSignInClient.signIn().addOnCompleteListener { signInTask ->
+                                        if (signInTask.isSuccessful && signInTask.result.isAuthenticated) {
+                                            openLeaderboard()
+                                        } else {
+                                            Log.e("PlayGames", "Play Games 로그인 실패", signInTask.exception)
+                                            Toast.makeText(context, "Play Games 로그인이 필요합니다.", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ) {
+                        Text("🏆 전체 사용자 랭킹 보기")
+                    }
+
+
+
+                    HorizontalDivider(color = Color(0xFFE6E3DA))
+
+                    OutlinedButton(
+                        onClick = { showCompletedStories = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = (user?.chapter ?: 1) > 1,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                    ) {
+                        Text(
+                            if ((user?.chapter ?: 1) > 1) "📖  클리어한 스토리 다시보기"
+                            else "📖  아직 클리어한 스토리가 없어요",
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Start,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+
                     OutlinedButton(
                         onClick = { showCompletedStories = true },
                         modifier = Modifier.fillMaxWidth(),
@@ -419,6 +533,59 @@ internal fun SettingsView(
                 color = Color(0xFF74786D),
             )
         }
+    }
+
+    if (showCouponInput) {
+        AlertDialog(
+            onDismissRequest = { showCouponInput = false },
+            title = { Text("쿠폰 입력") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("쿠폰 번호를 입력해주세요.")
+                    OutlinedTextField(
+                        value = couponCode,
+                        onValueChange = {
+                            couponCode = it.take(40)
+                            couponResult = null
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("쿠폰 번호") },
+                    )
+                    couponResult?.let { result ->
+                        Text(
+                            text = when (result) {
+                                CouponRedeemResult.Success ->
+                                    "${formatGameCurrency(couponReward ?: 0L)} 보상이 지급되었습니다."
+                                CouponRedeemResult.Invalid -> "유효하지 않은 쿠폰 번호입니다."
+                                CouponRedeemResult.AlreadyUsed -> "이미 사용한 쿠폰입니다."
+                                CouponRedeemResult.NoUser -> "로그인 정보를 확인할 수 없습니다."
+                            },
+                            color = if (result == CouponRedeemResult.Success) Color(0xFF2E7D32)
+                            else MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        couponSubmitting = true
+                        viewModel.redeemCoupon(couponCode) { result, reward ->
+                            couponResult = result
+                            couponReward = reward
+                            couponSubmitting = false
+                        }
+                    },
+                    enabled = couponCode.isNotBlank() &&
+                        couponResult != CouponRedeemResult.Success && !couponSubmitting,
+                ) { Text(if (couponSubmitting) "확인 중…" else "사용") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCouponInput = false }) { Text("닫기") }
+            },
+        )
     }
 
     if (showPrivacyPolicy) {

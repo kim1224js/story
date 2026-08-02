@@ -21,6 +21,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -45,6 +48,13 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,6 +64,7 @@ import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 import kotlin.random.Random
@@ -61,6 +72,62 @@ import java.text.NumberFormat
 import java.time.LocalDate
 import java.util.Locale
 import java.util.Random as JavaRandom
+
+@Composable
+internal fun HoldToRepeatButton(
+    onAction: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    colors: ButtonColors = ButtonDefaults.buttonColors(),
+    content: @Composable RowScope.() -> Unit,
+) {
+    val currentAction by rememberUpdatedState(onAction)
+    val interactionModifier = if (enabled) {
+        Modifier.pointerInput(Unit) {
+            awaitEachGesture {
+                awaitFirstDown(pass = PointerEventPass.Initial)
+                var gestureCompleted = false
+                var released = false
+                withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                    released = waitForUpOrCancellation(pass = PointerEventPass.Initial) != null
+                    gestureCompleted = true
+                }
+                if (gestureCompleted) {
+                    if (released) currentAction()
+                } else {
+                    currentAction()
+                    while (true) {
+                        val finished = withTimeoutOrNull(120L) {
+                            waitForUpOrCancellation(pass = PointerEventPass.Initial)
+                            true
+                        } == true
+                        if (finished) break
+                        currentAction()
+                    }
+                }
+            }
+        }
+    } else Modifier
+    Surface(
+        modifier = modifier
+            .then(interactionModifier)
+            .semantics {
+                role = Role.Button
+                if (enabled) onClick { currentAction(); true } else disabled()
+            },
+        shape = ButtonDefaults.shape,
+        color = if (enabled) colors.containerColor else colors.disabledContainerColor,
+        contentColor = if (enabled) colors.contentColor else colors.disabledContentColor,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp)
+                .padding(ButtonDefaults.ContentPadding),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+            content = content,
+        )
+    }
+}
 
 @Composable
 internal fun GambleView(viewModel: MainViewModel) {
@@ -203,8 +270,8 @@ internal fun GambleShopView(viewModel: MainViewModel) {
                             )
                         }
                         Spacer(Modifier.height(10.dp))
-                        Button(
-                            onClick = {
+                        HoldToRepeatButton(
+                            onAction = {
                                 viewModel.exchangeBlueChip {
                                     shopSoundPool.play(exchangeSound, gameAudioVolume, gameAudioVolume, 1, 0, 1f)
                                 }

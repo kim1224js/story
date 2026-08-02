@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">무릉도원</string>
+    <string name="game_services_project_id" translatable="false">406237319148</string>
+    <string name="leaderboard_id" translatable="false">CgkI7J-GrekLEAIQAQ</string>
 </resources>

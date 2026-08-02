@@ -25,6 +25,12 @@ import javax.inject.Singleton
         switchAccount(userId)
         return true
     }
+    suspend fun addAccount(id: String): Boolean {
+        val userId = id.trim()
+        if (userId.isBlank() || dao.getUser(userId) != null || dao.userCount() >= MAX_ACCOUNTS) return false
+        dao.save(UserEntity(userId = userId))
+        return true
+    }
     suspend fun switchAccount(userId: String) {
         prefs.edit().putString("user_id", userId).apply()
         activeUserId.value = userId
@@ -73,13 +79,12 @@ import javax.inject.Singleton
         district: String,
         cost: Long,
         requiredOwnedCount: Int,
-        finalStoryChapter: Int,
     ): Boolean = dao.purchaseApartment(
         activeUserId.value,
         district,
         cost,
+        BLUE_CHIP_EXCHANGE_COST,
         requiredOwnedCount,
-        finalStoryChapter,
     )
     suspend fun claimApartmentRent(hourlyRent: Long): ApartmentRentPayment? =
         dao.claimApartmentRent(activeUserId.value, hourlyRent, System.currentTimeMillis())

@@ -87,8 +87,7 @@ internal fun WorkView(
     val ttsSettings = LocalTtsSettings.current
     val state by viewModel.workState.collectAsState()
     val user by viewModel.user.collectAsState()
-    val currentChapter = user?.chapter ?: 1
-    val currentClearCost = stageClearCost(currentChapter)
+    val currentClearCost = economyStageClearCost()
     val moleRewardPerHit = stageCostPercentReward(currentClearCost, 0.02)
     val mazeReward = stageCostPercentReward(currentClearCost, 100.0)
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -258,7 +257,7 @@ internal fun WorkView(
                     partTimeJobs.filter { it.id == active.jobId }
                 } ?: partTimeJobs
                 visibleJobs.forEach { job ->
-                    val scaledReward = stagePercentReward(currentChapter, job.rewardPercent)
+                    val scaledReward = economyPercentReward(job.rewardPercent)
                     val active = state.activeJob
                     val isActive = active?.jobId == job.id
                     val finishAt = (active?.startedAt ?: now) + job.durationMillis
@@ -600,7 +599,7 @@ internal fun WorkView(
             text = {
                 Text(
                     "${job.title}을 완료했습니다.\n" +
-                        "${compactWon(stagePercentReward(user?.chapter ?: 1, job.rewardPercent).toDouble())}을 받을까요?",
+                        "${compactWon(economyPercentReward(job.rewardPercent).toDouble())}을 받을까요?",
                 )
             },
             confirmButton = {

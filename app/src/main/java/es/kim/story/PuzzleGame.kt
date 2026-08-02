@@ -51,8 +51,7 @@ private enum class PuzzlePhase { Waiting, Countdown, Playing, Finished }
 @Composable
 internal fun PuzzleView(viewModel: MainViewModel) {
     val state by viewModel.workState.collectAsState()
-    val user by viewModel.user.collectAsState()
-    val clearReward = stageClearCost(user?.chapter ?: 1)
+    val clearReward = economyStageClearCost()
     var selectedGame by remember { mutableIntStateOf(0) }
 
     Page(backgroundRes = R.drawable.work_background, backgroundAlpha = 0.5f) {

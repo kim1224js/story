@@ -23,8 +23,8 @@ android {
         applicationId = "es.kim.story"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 14
+        versionName = "2.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -72,6 +72,7 @@ dependencies {
     implementation(libs.dagger.hilt.android)
     ksp(libs.dagger.hilt.compiler)
     implementation(libs.androidx.health.connect)
+    implementation(libs.android.google.games)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
@@ -79,6 +80,7 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
+
 }
 
 

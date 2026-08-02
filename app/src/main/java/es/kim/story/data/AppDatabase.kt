@@ -4,9 +4,14 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [UserEntity::class], version = 11, exportSchema = false)
+@Database(
+    entities = [UserEntity::class, RpgCharacterEntity::class, RpgProgressEntity::class, RpgEquipmentInventoryEntity::class],
+    version = 15,
+    exportSchema = false,
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun userDao(): UserDao
+    abstract fun rpgDao(): RpgDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -82,6 +87,57 @@ abstract class AppDatabase : RoomDatabase() {
                         "(LENGTH(ownedApartmentDistricts) - " +
                         "LENGTH(REPLACE(ownedApartmentDistricts, ',', '')) + 1) >= 25",
                 )
+            }
+        }
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS rpg_character (" +
+                        "userId TEXT NOT NULL, slot INTEGER NOT NULL, name TEXT NOT NULL, " +
+                        "avatarIndex INTEGER NOT NULL, job TEXT NOT NULL, level INTEGER NOT NULL, " +
+                        "experience INTEGER NOT NULL, statPoints INTEGER NOT NULL, " +
+                        "strength INTEGER NOT NULL, dexterity INTEGER NOT NULL, " +
+                        "intelligence INTEGER NOT NULL, luck INTEGER NOT NULL, " +
+                        "maxHp INTEGER NOT NULL, maxMp INTEGER NOT NULL, currentHp INTEGER NOT NULL, " +
+                        "currentMp INTEGER NOT NULL, isDead INTEGER NOT NULL, weaponId TEXT NOT NULL, " +
+                        "weaponEnhancement INTEGER NOT NULL, armorId TEXT NOT NULL, " +
+                        "armorEnhancement INTEGER NOT NULL, PRIMARY KEY(userId, slot))",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS rpg_progress (" +
+                        "userId TEXT NOT NULL PRIMARY KEY, unlockedStage INTEGER NOT NULL, " +
+                        "highestClearedStage INTEGER NOT NULL, battlesWon INTEGER NOT NULL, " +
+                        "battlesLost INTEGER NOT NULL)",
+                )
+            }
+        }
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE rpg_progress ADD COLUMN walletBalance INTEGER NOT NULL DEFAULT 0",
+                )
+            }
+        }
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS rpg_equipment_inventory (" +
+                        "instanceId INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, ownerId TEXT NOT NULL, " +
+                        "equipmentId TEXT NOT NULL, enhancement INTEGER NOT NULL, equippedCharacterSlot INTEGER)",
+                )
+                db.execSQL(
+                    "INSERT INTO rpg_equipment_inventory (ownerId, equipmentId, enhancement, equippedCharacterSlot) " +
+                        "SELECT userId, weaponId, weaponEnhancement, slot FROM rpg_character WHERE weaponId != ''",
+                )
+                db.execSQL(
+                    "INSERT INTO rpg_equipment_inventory (ownerId, equipmentId, enhancement, equippedCharacterSlot) " +
+                        "SELECT userId, armorId, armorEnhancement, slot FROM rpg_character WHERE armorId != ''",
+                )
+            }
+        }
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE user ADD COLUMN heroTitleUnlocked INTEGER NOT NULL DEFAULT 0")
             }
         }
     }

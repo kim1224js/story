@@ -8,6 +8,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import es.kim.story.data.AppDatabase
 import es.kim.story.data.UserDao
+import es.kim.story.data.RpgDao
 import javax.inject.Singleton
 @Module @InstallIn(SingletonComponent::class) object AppModule {
     @Provides @Singleton fun database(@ApplicationContext context: Context): AppDatabase =
@@ -23,7 +24,12 @@ import javax.inject.Singleton
                 AppDatabase.MIGRATION_8_9,
                 AppDatabase.MIGRATION_9_10,
                 AppDatabase.MIGRATION_10_11,
+                AppDatabase.MIGRATION_11_12,
+                AppDatabase.MIGRATION_12_13,
+                AppDatabase.MIGRATION_13_14,
+                AppDatabase.MIGRATION_14_15,
             )
             .build()
     @Provides fun userDao(db: AppDatabase): UserDao = db.userDao()
+    @Provides fun rpgDao(db: AppDatabase): RpgDao = db.rpgDao()
 }

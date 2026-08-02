@@ -1957,6 +1957,13 @@ fun stageClearCost(chapter: Int): Long =
     storyChapters.getOrNull((chapter - 1).coerceIn(0, storyChapters.lastIndex))?.clearCost
         ?: storyChapters.last().clearCost
 
+const val ECONOMY_REWARD_CHAPTER = 70
+
+fun economyStageClearCost(): Long = stageClearCost(ECONOMY_REWARD_CHAPTER)
+
+fun economyPercentReward(percent: Double): Long =
+    stageCostPercentReward(economyStageClearCost(), percent)
+
 fun stagePercentReward(chapter: Int, percent: Double): Long =
     stageCostPercentReward(stageClearCost(chapter), percent)
 

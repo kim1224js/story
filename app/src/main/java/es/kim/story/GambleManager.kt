@@ -110,9 +110,9 @@ class GambleManager @Inject constructor(
     private val prefs = context.getSharedPreferences("gamble", Context.MODE_PRIVATE)
     private var currentAccount = ""
     private var opponentNames = DEFAULT_SEOTDA_OPPONENT_NAMES
-    private var allowedRpsWagers = baseWagersForChapter(1)
-    private var allowedSeotdaWagers = seotdaBaseWagersForChapter(1)
-    private var currentStageClearCost = stageClearCost(1)
+    private var allowedRpsWagers = baseWagersForChapter(ECONOMY_REWARD_CHAPTER)
+    private var allowedSeotdaWagers = seotdaBaseWagersForChapter(ECONOMY_REWARD_CHAPTER)
+    private var currentStageClearCost = economyStageClearCost()
     private var loadedDate = LocalDate.now().toString()
     private var preparedChoice = randomChoice()
     private val _state = MutableStateFlow(GambleState())

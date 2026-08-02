@@ -66,8 +66,6 @@ import java.util.Random as JavaRandom
 internal fun SettlementView(viewModel: MainViewModel) {
     val context = LocalContext.current
     val state by viewModel.stepQuestState.collectAsState()
-    val user by viewModel.user.collectAsState()
-    val currentChapter = user?.chapter ?: 1
     var settlementQuest by remember { mutableStateOf<StepQuest?>(null) }
     var showMoreMap by remember { mutableStateOf(false) }
     var moreRewardApplied by remember { mutableStateOf(false) }
@@ -87,7 +85,7 @@ internal fun SettlementView(viewModel: MainViewModel) {
             )
             Spacer(Modifier.height(10.dp))
             stepQuests.filter { it.period == QuestPeriod.Daily }.forEach { quest ->
-                StepQuestCard(quest, state.dailySteps, state, stagePercentReward(currentChapter, quest.rewardPercent)) {
+                StepQuestCard(quest, state.dailySteps, state, economyPercentReward(quest.rewardPercent)) {
                     moreRewardApplied = false
                     settlementQuest = quest
                 }
@@ -101,7 +99,7 @@ internal fun SettlementView(viewModel: MainViewModel) {
             )
             Spacer(Modifier.height(10.dp))
             stepQuests.filter { it.period == QuestPeriod.Weekly }.forEach { quest ->
-                StepQuestCard(quest, state.weeklySteps, state, stagePercentReward(currentChapter, quest.rewardPercent)) {
+                StepQuestCard(quest, state.weeklySteps, state, economyPercentReward(quest.rewardPercent)) {
                     moreRewardApplied = false
                     settlementQuest = quest
                 }
@@ -110,7 +108,7 @@ internal fun SettlementView(viewModel: MainViewModel) {
     }
 
     settlementQuest?.let { quest ->
-        val chapterReward = stagePercentReward(user?.chapter ?: 1, quest.rewardPercent)
+        val chapterReward = economyPercentReward(quest.rewardPercent)
         val settlementReward = if (moreRewardApplied) chapterReward + chapterReward / 2 else chapterReward
         Dialog(onDismissRequest = { settlementQuest = null }) {
             Card(
